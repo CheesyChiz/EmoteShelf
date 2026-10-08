@@ -25,5 +25,6 @@ public sealed class Bookmark
     public string Name = "";
     public string Command = "";
     public uint IconId;
+    public int? PoseIndex;
     public Dictionary<string, List<string>>? SavedOptions;
 }

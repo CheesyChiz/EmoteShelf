@@ -5,7 +5,7 @@ namespace EmoteShelf;
 
 public sealed record EmoteVariant(string Group, string Option, string[] Paths);
 public sealed record EmoteMod(string Directory, string Name, string EmoteName, string Command, uint Icon, string[] Paths,
-    EmoteVariant[] Variants);
+    EmoteVariant[] Variants, int? PoseIndex);
 
 public static partial class ModScanner
 {
@@ -76,7 +76,9 @@ public static partial class ModScanner
                 var relevant = variants.Where(v => v.Paths.Any(p => entry.Paths.Contains(p, StringComparer.OrdinalIgnoreCase)))
                     .DistinctBy(v => (v.Group, v.Option)).ToArray();
                 result.Add(new EmoteMod(directory, displayName, entry.Name, command, entry.Icon,
-                    [.. entry.Paths.Order(StringComparer.OrdinalIgnoreCase)], relevant));
+                    [.. entry.Paths.Order(StringComparer.OrdinalIgnoreCase)], relevant,
+                    command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) &&
+                    Regex.IsMatch(description, @"\bsit\s*2\b", RegexOptions.IgnoreCase) ? 1 : null));
             }
         }
         return [.. result.OrderBy(m => m.EmoteName, StringComparer.OrdinalIgnoreCase).ThenBy(m => m.Name, StringComparer.OrdinalIgnoreCase)];

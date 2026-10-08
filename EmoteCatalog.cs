@@ -8,6 +8,7 @@ public sealed class EmoteCatalog
 {
     private readonly Dictionary<string, (string Name, string Command, uint Icon)> timelines = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (string Name, string Command, uint Icon)> names = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Emote> commands = new(StringComparer.OrdinalIgnoreCase);
 
     public EmoteCatalog(IDataManager data)
     {
@@ -18,6 +19,7 @@ public sealed class EmoteCatalog
             var command = textCommand.Value.Command.ToString().Trim();
             if (!command.StartsWith('/')) command = "/" + command;
             if (!ModScanner.ValidCommand(command)) continue;
+            commands.TryAdd(command, emote);
             var name = emote.Name.ToString().Trim();
             if (name.Length == 0) name = command;
             names.TryAdd(name, (name, command, emote.Icon));
@@ -30,6 +32,9 @@ public sealed class EmoteCatalog
             }
         }
     }
+
+    public bool? IsUnlocked(string command, IUnlockState unlocks)
+        => commands.TryGetValue(command, out var emote) ? unlocks.IsEmoteUnlocked(emote) : null;
 
     public (string Name, string Command, uint Icon)? Resolve(string gamePath)
     {

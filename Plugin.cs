@@ -5,6 +5,8 @@ using Dalamud.IoC;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.System.String;
+using FFXIVClientStructs.FFXIV.Client.Game.Character;
+using FFXIVClientStructs.FFXIV.Client.Game.Control;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using Penumbra.Api.Enums;
 using Penumbra.Api.IpcSubscribers;
@@ -21,6 +23,7 @@ public sealed class Plugin : IDalamudPlugin
     [PluginService] private static IChatGui Chat { get; set; } = null!;
     [PluginService] private static IDataManager Data { get; set; } = null!;
     [PluginService] private static ITextureProvider Textures { get; set; } = null!;
+    [PluginService] private static IUnlockState Unlocks { get; set; } = null!;
     [PluginService] private static IPluginLog Log { get; set; } = null!;
 
     private const int TemporaryKey = -170025;
@@ -35,15 +38,21 @@ public sealed class Plugin : IDalamudPlugin
     private readonly RemoveAllTemporaryModSettings removeTemporary = new(Pi);
     private readonly RedrawObject redraw = new(Pi);
     private List<EmoteMod> discovered = [];
+    private EmoteCatalog? catalog;
     private bool settingsOpen;
     private string search = "";
     private string status = "";
     private Guid activeCollection;
     private string pendingCommand = "";
     private long sendAt;
+    private int pendingPoseIndex = -1;
+    private long poseAt;
+    private long poseReadyDeadline;
+    private int poseAttempts;
     private bool initialScanPending = true;
     private string lastCommand = "";
     private readonly HashSet<string> expandedVariants = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> expandedMods = new(StringComparer.OrdinalIgnoreCase);
 
     public Plugin()
     {
@@ -80,7 +89,7 @@ public sealed class Plugin : IDalamudPlugin
             var root = getRoot.Invoke();
             var mods = getMods.Invoke();
             if (string.IsNullOrWhiteSpace(root) || mods is null) throw new InvalidOperationException(T("Penumbra недоступна.", "Penumbra is unavailable."));
-            var catalog = new EmoteCatalog(Data);
+            catalog = new EmoteCatalog(Data);
             discovered = ModScanner.Scan(root, mods, catalog,
                 directory => getChangedItems.Invoke(directory, "").Keys);
             var changedBookmarks = false;
@@ -106,6 +115,8 @@ public sealed class Plugin : IDalamudPlugin
 
     private void Play(Bookmark bookmark)
     {
+        pendingCommand = "";
+        pendingPoseIndex = -1;
         if (!ModScanner.ValidCommand(bookmark.Command)) { status = T("У закладки нет корректной команды эмоции.", "The bookmark has no valid emote command."); return; }
         if (Objects.LocalPlayer is not { } player) { status = T("Персонаж не в игре.", "Character is not in game."); return; }
         var selected = discovered.FirstOrDefault(m => m.Directory == bookmark.ModDirectory &&
@@ -156,6 +167,8 @@ public sealed class Plugin : IDalamudPlugin
             }
             pendingCommand = bookmark.Command.Trim();
             sendAt = Environment.TickCount64 + 900;
+            pendingPoseIndex = bookmark.PoseIndex ?? selected.PoseIndex ?? -1;
+            poseAttempts = 0;
             lastCommand = pendingCommand;
             status = string.Format(T("Выбрано: {0} → {1}", "Selected: {0} → {1}"), selected.Name, pendingCommand);
         }
@@ -175,11 +188,59 @@ public sealed class Plugin : IDalamudPlugin
             initialScanPending = false;
             Scan();
         }
-        if (pendingCommand.Length == 0 || Environment.TickCount64 < sendAt) return;
-        var command = pendingCommand;
-        pendingCommand = "";
-        try { ExecuteEmote(command); }
-        catch (Exception ex) { status = string.Format(T("Мод переключен, но эмоция не запустилась: {0}", "Mod switched, but the emote did not start: {0}"), ex.Message); Log.Warning(ex, "Emote failed"); }
+        if (pendingCommand.Length > 0 && Environment.TickCount64 >= sendAt)
+        {
+            var command = pendingCommand;
+            pendingCommand = "";
+            try
+            {
+                ExecuteEmote(command);
+                if (pendingPoseIndex >= 0)
+                {
+                    poseAt = Environment.TickCount64 + 700;
+                    poseReadyDeadline = Environment.TickCount64 + 3500;
+                }
+            }
+            catch (Exception ex)
+            {
+                pendingPoseIndex = -1;
+                status = string.Format(T("Мод переключен, но эмоция не запустилась: {0}", "Mod switched, but the emote did not start: {0}"), ex.Message);
+                Log.Warning(ex, "Emote failed");
+            }
+        }
+        if (pendingPoseIndex < 0 || pendingCommand.Length > 0 || Environment.TickCount64 < poseAt) return;
+        try
+        {
+            var currentPose = CurrentPoseIndex();
+            if (currentPose < 0)
+            {
+                if (Environment.TickCount64 >= poseReadyDeadline)
+                {
+                    pendingPoseIndex = -1;
+                    status = T("Не удалось войти в /groundsit до смены позы.", "Could not enter /groundsit before changing pose.");
+                }
+                else poseAt = Environment.TickCount64 + 200;
+                return;
+            }
+            if (currentPose == pendingPoseIndex) { pendingPoseIndex = -1; return; }
+            if (poseAttempts++ >= 8)
+            {
+                pendingPoseIndex = -1;
+                status = T("Не удалось переключить нужную позу. Попробуй /cpose вручную.", "Could not reach the target pose. Try /cpose manually.");
+                return;
+            }
+            ExecuteEmote("/cpose");
+            poseAt = Environment.TickCount64 + 500;
+        }
+        catch (Exception ex) { pendingPoseIndex = -1; status = ex.Message; Log.Warning(ex, "Pose switch failed"); }
+    }
+
+    private unsafe int CurrentPoseIndex()
+    {
+        var player = Objects.LocalPlayer;
+        if (player is null) return -1;
+        var controller = &((Character*)player.Address)->EmoteController;
+        return controller->CurrentPoseType == EmoteController.PoseType.GroundSit ? controller->CPoseState : -1;
     }
 
     private unsafe void ExecuteEmote(string command)
@@ -211,7 +272,8 @@ public sealed class Plugin : IDalamudPlugin
         { ImGui.End(); if (config.OverlayLocked) ImGui.PopStyleVar(); return; }
         if (config.Bookmarks.Count == 0) ImGui.TextDisabled(T("Добавь эмоции: /eshelf → Эмоции", "Add emotes: /eshelf → Emotes"));
         var columns = Math.Clamp(config.Columns, 1, 12);
-        var size = new Vector2(Math.Clamp(config.IconSize, 28, 80));
+        var size = new Vector2(Math.Clamp(config.IconSize, 16, 80));
+        ImGui.PushStyleVar(ImGuiStyleVar.Alpha, Math.Clamp(config.PanelOpacity, 0.1f, 1f));
         for (var i = 0; i < config.Bookmarks.Count; i++)
         {
             var bookmark = config.Bookmarks[i];
@@ -235,6 +297,7 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.PopID();
         }
         ImGui.End();
+        ImGui.PopStyleVar();
         if (config.OverlayLocked) ImGui.PopStyleVar();
     }
 
@@ -245,14 +308,14 @@ public sealed class Plugin : IDalamudPlugin
         if (!ImGui.Begin("Emote Shelf##settings", ref settingsOpen)) { ImGui.End(); return; }
         if (ImGui.BeginTabBar("##tabs"))
         {
-            if (ImGui.BeginTabItem(T("Эмоции", "Emotes")))
+            if (ImGui.BeginTabItem(T("Эмоции", "Emotes") + "###emotes"))
             {
                 DrawEmoteTab();
                 ImGui.EndTabItem();
             }
-            if (ImGui.BeginTabItem(T("Панель", "Panel"))) { DrawPanelTab(); ImGui.EndTabItem(); }
-            if (ImGui.BeginTabItem(T("Как пользоваться", "How to use"))) { DrawHelpTab(); ImGui.EndTabItem(); }
-            if (ImGui.BeginTabItem(T("Настройки", "Settings"))) { DrawAdvancedTab(); ImGui.EndTabItem(); }
+            if (ImGui.BeginTabItem(T("Панель", "Panel") + "###panel")) { DrawPanelTab(); ImGui.EndTabItem(); }
+            if (ImGui.BeginTabItem(T("Как пользоваться", "How to use") + "###help")) { DrawHelpTab(); ImGui.EndTabItem(); }
+            if (ImGui.BeginTabItem(T("Настройки", "Settings") + "###settings")) { DrawAdvancedTab(); ImGui.EndTabItem(); }
             ImGui.EndTabBar();
         }
         ImGui.End();
@@ -269,58 +332,89 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.InputTextWithHint("##search", T("Поиск по эмоции или моду", "Search emote or mod"), ref search, 120);
         if (ImGui.BeginChild("##emoteList", new Vector2(0, 0), true))
         {
-            foreach (var (mod, index) in discovered.Select((m, i) => (m, i))
-                         .Where(x => x.m.Command.Length > 0 && !config.HiddenMods.Contains(x.m.Directory) &&
-                                     (x.m.Name.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                                      x.m.EmoteName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                                      x.m.Command.Contains(search, StringComparison.OrdinalIgnoreCase))))
+            var groups = discovered.Where(m => m.Command.Length > 0 && !config.HiddenMods.Contains(m.Directory))
+                .GroupBy(m => m.Directory, StringComparer.OrdinalIgnoreCase)
+                .OrderBy(g => g.First().Name, StringComparer.OrdinalIgnoreCase);
+            foreach (var group in groups)
             {
-                ImGui.PushID(index);
-                var variantKey = $"{mod.Directory}|{mod.Command}";
-                var expanded = expandedVariants.Contains(variantKey);
-                ImGui.BeginChild("##card", new Vector2(0, mod.Variants.Length == 0 ? 88 : expanded ? 90 + mod.Variants.Length * 23 : 80), true);
-                var icon = Textures.GetFromGameIcon(new GameIconLookup(mod.Icon == 0 ? 19u : mod.Icon)).GetWrapOrDefault();
-                if (icon is not null) ImGui.Image(icon.Handle, new Vector2(42));
-                else ImGui.Dummy(new Vector2(42));
-                ImGui.SameLine();
-                ImGui.BeginGroup();
-                ImGui.TextUnformatted(mod.EmoteName);
-                ImGui.SameLine();
-                ImGui.TextDisabled(mod.Command);
-                ImGui.TextDisabled(mod.Name);
-                ImGui.SameLine();
-                if (ImGui.SmallButton(T("Скрыть мод", "Hide mod")))
+                var matches = group.Where(m => m.Name.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                    m.EmoteName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+                    m.Command.Contains(search, StringComparison.OrdinalIgnoreCase)).ToArray();
+                if (matches.Length == 0) continue;
+                ImGui.PushID(group.Key);
+                var modExpanded = expandedMods.Contains(group.Key) || search.Length > 0;
+                if (ImGui.SmallButton($"{(modExpanded ? "▼" : "▶")} {group.First().Name} ({matches.Length})##mod"))
                 {
-                    config.HiddenMods.Add(mod.Directory);
-                    Save();
+                    if (expandedMods.Contains(group.Key)) expandedMods.Remove(group.Key);
+                    else expandedMods.Add(group.Key);
                 }
-                if (mod.Variants.Length == 0)
+                ImGui.SameLine();
+                if (ImGui.SmallButton(T("Скрыть мод", "Hide mod"))) { config.HiddenMods.Add(group.Key); Save(); }
+                if (modExpanded)
                 {
-                    if (ImGui.SmallButton(T("Предпросмотр", "Preview"))) Preview(mod, null);
-                    ImGui.SameLine();
-                    if (ImGui.SmallButton(T("На панель", "Add to panel"))) AddBookmark(mod, null);
-                }
-                ImGui.EndGroup();
-                if (mod.Variants.Length > 0)
-                {
-                    if (ImGui.SmallButton($"{(expanded ? "▼" : "▶")} {T("Варианты мода", "Mod variants")} ({mod.Variants.Length})##variants"))
+                    ImGui.Indent();
+                    foreach (var mod in matches)
                     {
-                        if (expanded) expandedVariants.Remove(variantKey);
-                        else expandedVariants.Add(variantKey);
-                    }
-                    if (expanded)
-                        foreach (var (variant, variantIndex) in mod.Variants.Select((v, i) => (v, i)))
+                        ImGui.PushID(mod.Command);
+                        var variantKey = $"{mod.Directory}|{mod.Command}";
+                        var expanded = expandedVariants.Contains(variantKey);
+                        var poseHintHeight = mod.PoseIndex.HasValue ? 18 : 0;
+                        ImGui.BeginChild("##card", new Vector2(0, (mod.Variants.Length == 0 ? 88 : expanded ? 90 + mod.Variants.Length * 23 : 80) + poseHintHeight), true);
+                        var icon = Textures.GetFromGameIcon(new GameIconLookup(mod.Icon == 0 ? 19u : mod.Icon)).GetWrapOrDefault();
+                        if (icon is not null) ImGui.Image(icon.Handle, new Vector2(42));
+                        else ImGui.Dummy(new Vector2(42));
+                        ImGui.SameLine();
+                        ImGui.BeginGroup();
+                        ImGui.TextUnformatted(mod.EmoteName);
+                        ImGui.SameLine();
+                        ImGui.TextDisabled(mod.Command);
+                        var lockedEmote = catalog?.IsUnlocked(mod.Command, Unlocks) == false;
+                        if (lockedEmote)
                         {
-                            ImGui.PushID(variantIndex);
-                            if (ImGui.SmallButton(T("На панель", "Add to panel"))) AddBookmark(mod, variant);
                             ImGui.SameLine();
-                            if (ImGui.SmallButton(T("Предпросмотр", "Preview"))) Preview(mod, variant);
-                            ImGui.SameLine();
-                            ImGui.TextUnformatted($"{variant.Group} → {variant.Option}");
-                            ImGui.PopID();
+                            ImGui.TextColored(new Vector4(1f, .65f, .25f, 1f), T("Не разблокирована", "Not unlocked"));
+                            if (ImGui.IsItemHovered()) ImGui.SetTooltip(T("Эта игровая эмоция ещё не открыта у персонажа. Мод не может запустить её одной заменой файлов.",
+                                "This game emote is not unlocked on this character. A file replacement alone cannot play it."));
                         }
+                        if (mod.Variants.Length == 0)
+                        {
+                            ImGui.BeginDisabled(lockedEmote);
+                            if (ImGui.SmallButton(T("Предпросмотр", "Preview"))) Preview(mod, null);
+                            ImGui.SameLine();
+                            if (ImGui.SmallButton(T("На панель", "Add to panel"))) AddBookmark(mod, null);
+                            ImGui.EndDisabled();
+                        }
+                        ImGui.EndGroup();
+                        if (mod.PoseIndex.HasValue)
+                            ImGui.TextDisabled(T("Поза 2: после /groundsit переключение займёт около 1–2 секунд.",
+                                "Pose 2: switching after /groundsit takes about 1–2 seconds."));
+                        if (mod.Variants.Length > 0)
+                        {
+                            if (ImGui.SmallButton($"{(expanded ? "▼" : "▶")} {T("Варианты мода", "Mod variants")} ({mod.Variants.Length})##variants"))
+                            {
+                                if (expanded) expandedVariants.Remove(variantKey);
+                                else expandedVariants.Add(variantKey);
+                            }
+                            if (expanded)
+                                foreach (var (variant, variantIndex) in mod.Variants.Select((v, i) => (v, i)))
+                                {
+                                    ImGui.PushID(variantIndex);
+                                    ImGui.BeginDisabled(lockedEmote);
+                                    if (ImGui.SmallButton(T("На панель", "Add to panel"))) AddBookmark(mod, variant);
+                                    ImGui.SameLine();
+                                    if (ImGui.SmallButton(T("Предпросмотр", "Preview"))) Preview(mod, variant);
+                                    ImGui.EndDisabled();
+                                    ImGui.SameLine();
+                                    ImGui.TextUnformatted($"{variant.Group} → {variant.Option}");
+                                    ImGui.PopID();
+                                }
+                        }
+                        ImGui.EndChild();
+                        ImGui.PopID();
+                    }
+                    ImGui.Unindent();
                 }
-                ImGui.EndChild();
+                ImGui.Separator();
                 ImGui.PopID();
             }
         }
@@ -357,7 +451,7 @@ public sealed class Plugin : IDalamudPlugin
         if (variant is not null) saved[variant.Group] = [variant.Option];
         return new Bookmark { ModDirectory = mod.Directory,
             Name = variant is null ? $"{mod.EmoteName} — {mod.Name}" : $"{mod.EmoteName} — {variant.Option}",
-            Command = mod.Command, IconId = mod.Icon, SavedOptions = saved };
+            Command = mod.Command, IconId = mod.Icon, SavedOptions = saved, PoseIndex = mod.PoseIndex };
     }
 
     private void DrawPanelTab()
@@ -366,8 +460,8 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.SameLine();
         if (ImGui.Checkbox(T("Закрепить положение", "Lock position"), ref config.OverlayLocked)) Save();
         if (ImGui.SliderInt(T("Значков в строке", "Icons per row"), ref config.Columns, 1, 12)) Save();
-        if (ImGui.SliderFloat(T("Размер значка", "Icon size"), ref config.IconSize, 28, 80)) Save();
-        if (ImGui.SliderFloat(T("Прозрачность фона", "Background opacity"), ref config.PanelOpacity, 0f, 1f)) Save();
+        if (ImGui.SliderFloat(T("Размер значка", "Icon size"), ref config.IconSize, 16, 80)) Save();
+        if (ImGui.SliderFloat(T("Прозрачность панели", "Panel opacity"), ref config.PanelOpacity, 0.1f, 1f)) Save();
         ImGui.TextWrapped(T("Панель — отдельное маленькое окно с иконками эмоций. Когда положение не закреплено, перетащи её за заголовок. Закрывается только здесь или командой /eshelf hide.",
             "The panel is a separate small window of emote icons. Unlock it to drag by its title. Hide it here or with /eshelf hide."));
         ImGui.Separator();
@@ -385,9 +479,21 @@ public sealed class Plugin : IDalamudPlugin
             if (ImGui.InputText($"##name{i}", ref name, 100)) { b.Name = name; Save(); }
             ImGui.SameLine();
             ImGui.TextDisabled(b.Command);
-            ImGui.SameLine();
-            if (ImGui.SmallButton($"{T("Обновить опции", "Update options")}##{i}")) CaptureOptions(b);
-            if (b.SavedOptions is not null) { ImGui.SameLine(); ImGui.TextDisabled("✓"); }
+        }
+        if (config.Bookmarks.Count > 0 && ImGui.TreeNode(T("Дополнительно: снимки настроек модов", "Advanced: saved mod options") + "##savedOptions"))
+        {
+            ImGui.TextWrapped(T("При добавлении значка опции мода сохраняются автоматически. Если позже ты поменял их в Penumbra и хочешь заменить сохранённый вариант, нажми кнопку ниже. Это не нужно делать при каждом запуске.",
+                "Mod options are saved automatically when an icon is added. If you later change them in Penumbra and want to replace that saved variant, use the button below. This is not needed on every launch."));
+            for (var i = 0; i < config.Bookmarks.Count; i++)
+            {
+                var b = config.Bookmarks[i];
+                ImGui.PushID(i);
+                if (ImGui.SmallButton(T("Обновить опции", "Update options"))) CaptureOptions(b);
+                ImGui.SameLine();
+                ImGui.TextUnformatted(b.Name);
+                ImGui.PopID();
+            }
+            ImGui.TreePop();
         }
     }
 

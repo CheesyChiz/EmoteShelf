@@ -72,6 +72,22 @@ internal static class Localization
             ("不要なMODは一覧から非表示にできます。「設定」→「非表示のMOD」から戻せます。登録済みのアイコンは残ります。",
              "Unerwünschte Mods direkt in der Liste ausblenden. Unter Einstellungen → Ausgeblendete Mods wiederherstellen. Vorhandene Lesezeichen bleiben erhalten.",
              "Masquez les mods indésirables dans la liste. Restaurez-les via Paramètres → Mods masqués. Les raccourcis déjà ajoutés restent sur le panneau."),
+        ["Not unlocked"] = ("未解放", "Nicht freigeschaltet", "Non débloquée"),
+        ["This game emote is not unlocked on this character. A file replacement alone cannot play it."] =
+            ("このキャラクターはゲーム内でこのエモートを解放していません。ファイルの置換だけでは再生できません。",
+             "Diese Spiel-Emote ist für den Charakter nicht freigeschaltet. Ein Dateiaustausch allein kann sie nicht abspielen.",
+             "Cette emote du jeu n'est pas débloquée pour ce personnage. Le remplacement des fichiers seul ne peut pas la lancer."),
+        ["Pose 2: switching after /groundsit takes about 1–2 seconds."] =
+            ("ポーズ2：/groundsit の後、切り替えに約1～2秒かかります。", "Pose 2: Der Wechsel nach /groundsit dauert etwa 1–2 Sekunden.", "Pose 2 : le changement après /groundsit prend environ 1 à 2 secondes."),
+        ["Could not reach the target pose. Try /cpose manually."] =
+            ("目的のポーズに切り替えられませんでした。/cpose を手動で試してください。", "Zielpose nicht erreicht. /cpose bitte manuell versuchen.", "Impossible d'atteindre la pose voulue. Essayez /cpose manuellement."),
+        ["Could not enter /groundsit before changing pose."] =
+            ("ポーズ変更前に /groundsit を開始できませんでした。", "Vor dem Posenwechsel konnte /groundsit nicht gestartet werden.", "Impossible de lancer /groundsit avant de changer de pose."),
+        ["Advanced: saved mod options"] = ("詳細：保存済みMODオプション", "Erweitert: gespeicherte Mod-Optionen", "Avancé : options de mod enregistrées"),
+        ["Mod options are saved automatically when an icon is added. If you later change them in Penumbra and want to replace that saved variant, use the button below. This is not needed on every launch."] =
+            ("アイコンを追加するとMODのオプションは自動保存されます。後からPenumbraで変更し、保存済みの内容を更新したい場合だけ下のボタンを使ってください。毎回押す必要はありません。",
+             "Mod-Optionen werden beim Hinzufügen eines Symbols automatisch gespeichert. Nur wenn sie später in Penumbra geändert wurden und der gespeicherte Stand ersetzt werden soll, die Schaltfläche unten verwenden. Nicht bei jedem Start nötig.",
+             "Les options du mod sont enregistrées automatiquement lors de l'ajout d'une icône. Si vous les modifiez ensuite dans Penumbra et souhaitez remplacer la variante enregistrée, utilisez le bouton ci-dessous. Ce n'est pas nécessaire à chaque lancement."),
     };
 
     internal static string Get(string language, string ru, string en)
