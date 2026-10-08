@@ -9,6 +9,7 @@ public sealed class Configuration : IPluginConfiguration
     public bool OverlayVisible = true;
     public List<Bookmark> Bookmarks = [];
     public Dictionary<string, string> CommandOverrides = new(StringComparer.OrdinalIgnoreCase);
+    public HashSet<string> HiddenMods = new(StringComparer.OrdinalIgnoreCase);
     public bool OverlayLocked;
     public int Columns = 4;
     public float IconSize = 44;
