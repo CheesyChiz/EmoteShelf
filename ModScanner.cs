@@ -3,14 +3,15 @@ using System.Text.RegularExpressions;
 
 namespace EmoteShelf;
 
-public sealed record EmoteMod(string Directory, string Name, string Command, string[] Paths);
+public sealed record EmoteMod(string Directory, string Name, string EmoteName, string Command, uint Icon, string[] Paths);
 
 public static partial class ModScanner
 {
     [GeneratedRegex(@"(?<![\w/])/[a-z][a-z0-9]{2,}(?![\w/])", RegexOptions.IgnoreCase)]
     private static partial Regex SlashCommand();
 
-    public static List<EmoteMod> Scan(string root, IDictionary<string, string> mods)
+    public static List<EmoteMod> Scan(string root, IDictionary<string, string> mods, EmoteCatalog catalog,
+        Func<string, IEnumerable<string>> changedItems)
     {
         var result = new List<EmoteMod>();
         foreach (var (directory, displayName) in mods)
@@ -39,12 +40,37 @@ public static partial class ModScanner
                 catch (UnauthorizedAccessException) { }
             }
             if (paths.Count == 0) continue;
-            var commands = InferCommands(description);
-            if (commands.Count == 0) commands.Add("");
-            foreach (var command in commands)
-                result.Add(new EmoteMod(directory, displayName, command, [.. paths.Order(StringComparer.OrdinalIgnoreCase)]));
+            var byCommand = new Dictionary<string, (string Name, uint Icon, List<string> Paths)>(StringComparer.OrdinalIgnoreCase);
+            foreach (var path in paths)
+            {
+                var match = catalog.Resolve(path);
+                if (match is null) continue;
+                var (name, command, icon) = match.Value;
+                if (!byCommand.TryGetValue(command, out var entry)) entry = (name, icon, []);
+                entry.Paths.Add(path);
+                byCommand[command] = entry;
+            }
+            try
+            {
+                foreach (var changed in changedItems(directory))
+                {
+                    var match = catalog.ResolveChangedItem(changed);
+                    if (match is null) continue;
+                    var (name, command, icon) = match.Value;
+                    if (!byCommand.ContainsKey(command)) byCommand[command] = (name, icon, [.. paths]);
+                }
+            }
+            catch { /* Some Penumbra versions may not expose changed items. */ }
+            if (byCommand.Count == 0)
+            {
+                var inferred = InferCommands(description);
+                foreach (var command in inferred) byCommand[command] = (command, 0, [.. paths]);
+            }
+            if (byCommand.Count == 0) byCommand[""] = ("Unknown emote", 0, [.. paths]);
+            foreach (var (command, entry) in byCommand)
+                result.Add(new EmoteMod(directory, displayName, entry.Name, command, entry.Icon, [.. entry.Paths.Order(StringComparer.OrdinalIgnoreCase)]));
         }
-        return [.. result.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase)];
+        return [.. result.OrderBy(m => m.EmoteName, StringComparer.OrdinalIgnoreCase).ThenBy(m => m.Name, StringComparer.OrdinalIgnoreCase)];
     }
 
     private static void Collect(JsonElement element, HashSet<string> paths)
