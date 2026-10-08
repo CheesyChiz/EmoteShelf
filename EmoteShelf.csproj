@@ -1,0 +1,25 @@
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <PropertyGroup>
+    <Version>0.1.0.0</Version>
+    <Author>CheesyChiz</Author>
+    <Name>Emote Shelf</Name>
+    <InternalName>EmoteShelf</InternalName>
+    <Punchline>One-click bookmarks for Penumbra emote mods.</Punchline>
+    <Description>Finds installed Penumbra emote replacements, pins them to a movable overlay, temporarily selects the needed mod, then plays its emote. Settings: /eshelf.</Description>
+    <Tags>emote;dance;penumbra;overlay</Tags>
+    <RepoUrl>https://github.com/CheesyChiz/EmoteShelf</RepoUrl>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="Penumbra.Api">
+      <HintPath>C:\Users\Whale\AppData\Roaming\XIVLauncher\installedPlugins\Penumbra\1.7.2.1\Penumbra.Api.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Luna">
+      <HintPath>C:\Users\Whale\AppData\Roaming\XIVLauncher\installedPlugins\Penumbra\1.7.2.1\Luna.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
