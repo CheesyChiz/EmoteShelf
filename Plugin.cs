@@ -272,7 +272,7 @@ public sealed class Plugin : IDalamudPlugin
                                       x.m.Command.Contains(search, StringComparison.OrdinalIgnoreCase))))
             {
                 ImGui.PushID(index);
-                ImGui.BeginChild("##card", new Vector2(0, mod.Variants.Length > 0 ? 112 : 88), true);
+                ImGui.BeginChild("##card", new Vector2(0, mod.Variants.Length > 0 ? 116 + mod.Variants.Length * 23 : 88), true);
                 var icon = Textures.GetFromGameIcon(new GameIconLookup(mod.Icon == 0 ? 19u : mod.Icon)).GetWrapOrDefault();
                 if (icon is not null) ImGui.Image(icon.Handle, new Vector2(42));
                 else ImGui.Dummy(new Vector2(42));
