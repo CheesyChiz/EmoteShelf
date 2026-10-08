@@ -49,6 +49,7 @@ public sealed class Plugin : IDalamudPlugin
         config = Pi.GetPluginConfig() as Configuration ?? new Configuration();
         config.Bookmarks ??= [];
         config.CommandOverrides ??= new(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrEmpty(config.Language)) config.Language = config.English ? "en" : "ru";
         Commands.AddHandler("/eshelf", new CommandInfo(OnCommand) { HelpMessage = "Emote Shelf: /eshelf, /eshelf scan, /eshelf show, /eshelf hide" });
         Pi.UiBuilder.Draw += Draw;
         Pi.UiBuilder.OpenConfigUi += OpenSettings;
@@ -197,10 +198,13 @@ public sealed class Plugin : IDalamudPlugin
     private void DrawOverlay()
     {
         var flags = ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoCollapse;
-        if (config.OverlayLocked) flags |= ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize;
+        if (config.OverlayLocked) flags |= ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize |
+            ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoBackground;
+        ImGui.SetNextWindowBgAlpha(Math.Clamp(config.PanelOpacity, 0f, 1f));
         ImGui.SetNextWindowSize(new Vector2(240, 90), ImGuiCond.FirstUseEver);
+        if (config.OverlayLocked) ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
         if (!ImGui.Begin("Emote Shelf##overlay", flags))
-        { ImGui.End(); return; }
+        { ImGui.End(); if (config.OverlayLocked) ImGui.PopStyleVar(); return; }
         if (config.Bookmarks.Count == 0) ImGui.TextDisabled(T("Добавь эмоции: /eshelf → Эмоции", "Add emotes: /eshelf → Emotes"));
         var columns = Math.Clamp(config.Columns, 1, 12);
         var size = new Vector2(Math.Clamp(config.IconSize, 28, 80));
@@ -213,11 +217,21 @@ public sealed class Plugin : IDalamudPlugin
             var clicked = icon is not null
                 ? ImGui.ImageButton(icon.Handle, size)
                 : ImGui.Button(bookmark.Command, size);
-            if (clicked) Play(bookmark);
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{bookmark.Name}\n{bookmark.Command}");
+            if (clicked)
+            {
+                if (ImGui.GetIO().KeyCtrl && ImGui.GetIO().KeyShift)
+                {
+                    config.Bookmarks.RemoveAt(i);
+                    Save();
+                    i--;
+                }
+                else Play(bookmark);
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{bookmark.Name}\n{bookmark.Command}\n{T("Ctrl+Shift+клик — убрать с панели", "Ctrl+Shift+click — remove from panel")}");
             ImGui.PopID();
         }
         ImGui.End();
+        if (config.OverlayLocked) ImGui.PopStyleVar();
     }
 
     private void DrawSettings()
@@ -240,15 +254,14 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.End();
     }
 
-    private string T(string ru, string en) => config.English ? en : ru;
+    private string T(string ru, string en) => config.Language == "ru" ? ru : en;
 
     private void DrawEmoteTab()
     {
-        ImGui.TextWrapped(T("Выбери эмоцию и нажми «На панель». Затем нажми её значок на игровой панели.",
-            "Choose an emote and click Add to panel. Then click its icon on the in-game panel."));
+        ImGui.TextWrapped(T("Найди эмоцию, проверь её через «Предпросмотр» и добавь на панель. Закладка сохранится автоматически.",
+            "Find an emote, try Preview, then add it to the panel. The bookmark is saved automatically."));
         if (ImGui.Button(T("Обновить список", "Refresh list"))) Scan();
-        ImGui.SameLine();
-        ImGui.TextDisabled(status);
+        ImGui.TextWrapped(status);
         ImGui.InputTextWithHint("##search", T("Поиск по эмоции или моду", "Search emote or mod"), ref search, 120);
         if (ImGui.BeginChild("##emoteList", new Vector2(0, 0), true))
         {
@@ -259,23 +272,72 @@ public sealed class Plugin : IDalamudPlugin
                                       x.m.Command.Contains(search, StringComparison.OrdinalIgnoreCase))))
             {
                 ImGui.PushID(index);
-                ImGui.TextUnformatted($"{mod.EmoteName}  {mod.Command}");
+                ImGui.BeginChild("##card", new Vector2(0, mod.Variants.Length > 0 ? 112 : 88), true);
+                var icon = Textures.GetFromGameIcon(new GameIconLookup(mod.Icon == 0 ? 19u : mod.Icon)).GetWrapOrDefault();
+                if (icon is not null) ImGui.Image(icon.Handle, new Vector2(42));
+                else ImGui.Dummy(new Vector2(42));
                 ImGui.SameLine();
-                if (ImGui.Button(T("На панель", "Add to panel")))
-                {
-                    config.Bookmarks.Add(new Bookmark { ModDirectory = mod.Directory,
-                        Name = $"{mod.EmoteName} — {mod.Name}", Command = mod.Command, IconId = mod.Icon });
-                    config.OverlayVisible = true;
-                    Save();
-                    status = T("Добавлено. Открой вкладку «Панель», чтобы настроить значки.",
-                        "Added. Open the Panel tab to arrange icons.");
-                }
+                ImGui.BeginGroup();
+                ImGui.TextUnformatted(mod.EmoteName);
+                ImGui.SameLine();
+                ImGui.TextDisabled(mod.Command);
                 ImGui.TextDisabled(mod.Name);
-                ImGui.Separator();
+                if (ImGui.SmallButton(T("Предпросмотр", "Preview"))) Preview(mod, null);
+                ImGui.SameLine();
+                if (ImGui.SmallButton(T("На панель", "Add to panel"))) AddBookmark(mod, null);
+                ImGui.EndGroup();
+                if (mod.Variants.Length > 0 && ImGui.TreeNode($"{T("Варианты мода", "Mod variants")} ({mod.Variants.Length})##variants"))
+                {
+                    foreach (var (variant, variantIndex) in mod.Variants.Select((v, i) => (v, i)))
+                    {
+                        ImGui.PushID(variantIndex);
+                        if (ImGui.SmallButton(T("На панель", "Add to panel"))) AddBookmark(mod, variant);
+                        ImGui.SameLine();
+                        if (ImGui.SmallButton(T("Предпросмотр", "Preview"))) Preview(mod, variant);
+                        ImGui.SameLine();
+                        ImGui.TextUnformatted($"{variant.Group} → {variant.Option}");
+                        ImGui.PopID();
+                    }
+                    ImGui.TreePop();
+                }
+                ImGui.EndChild();
                 ImGui.PopID();
             }
         }
         ImGui.EndChild();
+    }
+
+    private void AddBookmark(EmoteMod mod, EmoteVariant? variant)
+    {
+        try
+        {
+            config.Bookmarks.Add(CreateBookmark(mod, variant));
+            config.OverlayVisible = true;
+            Save();
+            status = T("Добавлено на панель. Настрой расположение во вкладке «Панель».",
+                "Added to panel. Arrange it on the Panel tab.");
+        }
+        catch (Exception ex) { status = ex.Message; Log.Warning(ex, "Adding bookmark failed"); }
+    }
+
+    private void Preview(EmoteMod mod, EmoteVariant? variant)
+    {
+        try { Play(CreateBookmark(mod, variant)); }
+        catch (Exception ex) { status = ex.Message; Log.Warning(ex, "Preview failed"); }
+    }
+
+    private Bookmark CreateBookmark(EmoteMod mod, EmoteVariant? variant)
+    {
+        if (Objects.LocalPlayer is not { } player) throw new InvalidOperationException(T("Персонаж не в игре.", "Character is not in game."));
+        var (valid, _, collection) = getCollection.Invoke(player.ObjectIndex);
+        if (!valid || collection.Id == Guid.Empty) throw new InvalidOperationException(T("Коллекция не найдена.", "Collection not found."));
+        var (ec, current) = getSettings.Invoke(collection.Id, mod.Directory, "", false);
+        if (ec != PenumbraApiEc.Success || current is null) throw new InvalidOperationException($"Penumbra: {ec}");
+        var saved = current.Value.Item3.ToDictionary(x => x.Key, x => x.Value.ToList());
+        if (variant is not null) saved[variant.Group] = [variant.Option];
+        return new Bookmark { ModDirectory = mod.Directory,
+            Name = variant is null ? $"{mod.EmoteName} — {mod.Name}" : $"{mod.EmoteName} — {variant.Option}",
+            Command = mod.Command, IconId = mod.Icon, SavedOptions = saved };
     }
 
     private void DrawPanelTab()
@@ -285,6 +347,7 @@ public sealed class Plugin : IDalamudPlugin
         if (ImGui.Checkbox(T("Закрепить положение", "Lock position"), ref config.OverlayLocked)) Save();
         if (ImGui.SliderInt(T("Значков в строке", "Icons per row"), ref config.Columns, 1, 12)) Save();
         if (ImGui.SliderFloat(T("Размер значка", "Icon size"), ref config.IconSize, 28, 80)) Save();
+        if (ImGui.SliderFloat(T("Прозрачность фона", "Background opacity"), ref config.PanelOpacity, 0f, 1f)) Save();
         ImGui.TextWrapped(T("Панель — отдельное маленькое окно с иконками эмоций. Когда положение не закреплено, перетащи её за заголовок. Закрывается только здесь или командой /eshelf hide.",
             "The panel is a separate small window of emote icons. Unlock it to drag by its title. Hide it here or with /eshelf hide."));
         ImGui.Separator();
@@ -303,7 +366,7 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.SameLine();
             ImGui.TextDisabled(b.Command);
             ImGui.SameLine();
-            if (ImGui.SmallButton($"{T("Запомнить опции", "Save options")}##{i}")) CaptureOptions(b);
+            if (ImGui.SmallButton($"{T("Обновить опции", "Update options")}##{i}")) CaptureOptions(b);
             if (b.SavedOptions is not null) { ImGui.SameLine(); ImGui.TextDisabled("✓"); }
         }
     }
@@ -311,13 +374,23 @@ public sealed class Plugin : IDalamudPlugin
     private void DrawHelpTab()
     {
         ImGui.TextWrapped(T(
-            "1. Во вкладке «Эмоции» найди нужный танец или эмоцию и нажми «На панель». В строке указаны игровая эмоция и мод, который её заменяет.\n\n2. На экране появится маленькая панель значков. Нажми значок: плагин временно выберет этот мод в Penumbra и запустит соответствующую игровую эмоцию.\n\n3. Во вкладке «Панель» настрой сетку, размер и положение. Для разных вариантов одной эмоции можно добавить её дважды и у каждой закладки сохранить текущие опции Penumbra.\n\nЕсли эмоция не распознана по игровым данным или описанию мода, открой «Настройки» и укажи её команду вручную. Это запасной вариант, а не обязательный шаг.",
-            "1. On Emotes, find a dance or emote and click Add to panel. Each row shows the game emote and its replacing mod.\n\n2. A small icon panel appears in-game. Click an icon to temporarily select that Penumbra mod and run the matching game emote.\n\n3. On Panel, set the grid, icon size and position. To save two variants of one emote, add it twice and save the current Penumbra options for each bookmark.\n\nIf an emote cannot be identified from game data or the mod description, use Settings to enter its command manually. This is a fallback, not a required step."));
+            "1. Во вкладке «Эмоции» найди нужный танец или эмоцию. «Предпросмотр» запускает её без добавления, «На панель» создаёт постоянную закладку с текущими опциями мода. Если есть распознанные варианты, раскрой «Варианты мода».\n\n2. На экране появится панель значков. Клик запускает эмоцию, Ctrl+Shift+клик удаляет значок. Предпросмотр и клик временно выбирают мод в Penumbra; сбросить переключение можно во вкладке «Настройки».\n\n3. Во вкладке «Панель» настрой сетку, размер и положение. Опции сохраняются автоматически при добавлении. Если позже изменишь настройки мода и захочешь заменить снимок, нажми «Обновить опции». Сочетания нескольких групп вариантов автоматически не перечисляются: настрой нужное сочетание в Penumbra и добавь закладку.\n\nЕсли эмоция не распознана по игровым данным или описанию мода, открой «Настройки» и укажи её команду вручную. Это запасной вариант, а не обязательный шаг.",
+            "1. On Emotes, find a dance or emote. Preview plays it without adding it; Add to panel creates a persistent bookmark with the mod's current options. Expand Mod variants if detected.\n\n2. An icon panel appears in-game. Click to play, Ctrl+Shift+click to remove an icon. Preview and click temporarily select the mod in Penumbra; reset the temporary selection on Settings.\n\n3. On Panel, set the grid, icon size and position. Options are captured automatically on add. If you later change the mod and want to replace that snapshot, click Update options. Combinations of multiple option groups are not enumerated automatically: configure the combination in Penumbra and add a bookmark.\n\nIf an emote cannot be identified from game data or the mod description, use Settings to enter its command manually. This is a fallback, not a required step."));
     }
 
     private void DrawAdvancedTab()
     {
-        if (ImGui.Checkbox("English UI", ref config.English)) Save();
+        var languages = new[] { ("ru", "Русский"), ("en", "English"), ("ja", "日本語"), ("de", "Deutsch"), ("fr", "Français") };
+        var selectedLanguage = languages.FirstOrDefault(x => x.Item1 == config.Language).Item2 ?? "Русский";
+        ImGui.SetNextItemWidth(180);
+        if (ImGui.BeginCombo(T("Язык интерфейса", "Interface language"), selectedLanguage))
+        {
+            foreach (var (code, label) in languages)
+                if (ImGui.Selectable(label, config.Language == code)) { config.Language = code; Save(); }
+            ImGui.EndCombo();
+        }
+        if (config.Language is "ja" or "de" or "fr")
+            ImGui.TextDisabled("Interface translation in progress; English text is shown for now.");
         if (ImGui.Button(T("Сбросить временное переключение", "Clear temporary selection")))
         {
             try { if (activeCollection != Guid.Empty) removeTemporary.Invoke(activeCollection, TemporaryKey); status = T("Временные настройки сняты.", "Temporary settings cleared."); }
@@ -337,9 +410,15 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.SameLine();
             if (ImGui.Button(T("На панель", "Add to panel")) && ModScanner.ValidCommand(command))
             {
-                config.Bookmarks.Add(new Bookmark { ModDirectory = mod.Directory, Name = mod.Name, Command = command });
-                config.OverlayVisible = true;
-                Save();
+                try
+                {
+                    var bookmark = CreateBookmark(mod, null);
+                    bookmark.Command = command;
+                    config.Bookmarks.Add(bookmark);
+                    config.OverlayVisible = true;
+                    Save();
+                }
+                catch (Exception ex) { status = ex.Message; Log.Warning(ex, "Adding manual bookmark failed"); }
             }
             ImGui.PopID();
         }

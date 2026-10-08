@@ -12,7 +12,9 @@ public sealed class Configuration : IPluginConfiguration
     public bool OverlayLocked;
     public int Columns = 4;
     public float IconSize = 44;
+    public float PanelOpacity = 0.85f;
     public bool English;
+    public string Language = "";
 }
 
 [Serializable]
