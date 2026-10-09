@@ -12,6 +12,7 @@
     <Compile Include="../PosePlayback.cs" Link="PosePlayback.cs" />
     <Compile Include="../PairRules.cs" Link="PairRules.cs" />
     <Compile Include="../PairClient.cs" Link="PairClient.cs" />
+    <Compile Include="../LinkClient.cs" Link="LinkClient.cs" />
     <Compile Include="../PapCompatibility.cs" Link="PapCompatibility.cs" />
     <Compile Include="../ModScanner.cs" Link="ModScanner.cs" />
   </ItemGroup>

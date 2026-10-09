@@ -5,6 +5,7 @@ import secrets
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from links import LinkStore
 
 HEX = re.compile(r"^[0-9a-f]{64}$")
 TOKEN = re.compile(r"^[A-Za-z0-9_-]{43}$")
@@ -90,6 +91,7 @@ class PairStore:
 
 
 store = PairStore()
+links = LinkStore()
 rate_lock = threading.Lock()
 rates = {}
 
@@ -143,6 +145,20 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed():
             return self.reply(429, dict(error='Rate limited'))
         try:
+            if self.path in ('/v2/connect', '/v2/link'):
+                length = int(self.headers.get('Content-Length', '0'))
+                if not 0 < length <= 1024:
+                    return self.reply(413, dict(error='Invalid body size'))
+                data = json.loads(self.rfile.read(length))
+                if not isinstance(data, dict):
+                    raise ValueError('Invalid message')
+                if self.path == '/v2/connect':
+                    if set(data) != {'identity'}:
+                        raise ValueError('Invalid message')
+                    return self.reply(200, dict(token=links.register(data['identity'])))
+                if set(data) != {'action', 'target', 'invitation'} or not all(isinstance(v, str) for v in data.values()):
+                    raise ValueError('Invalid message')
+                return self.reply(200, links.action(self.token(), **data))
             if self.path in ('/v1/prepared', '/v1/finished'):
                 action = store.prepared if self.path.endswith('prepared') else store.finished
                 action(self.token())

@@ -35,6 +35,25 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.request('GET', '/v1/session/' + 'x'*43)[0], 404)
         self.assertEqual(self.request('GET', '/v1/session', token='x'*43)[0], 404)
 
+    def test_link_http(self):
+        server.rates.clear()
+        server.links = server.LinkStore()
+        code, a = self.request('POST', '/v2/connect', {'identity': 'd'*64})
+        self.assertEqual(code, 200)
+        code, b = self.request('POST', '/v2/connect', {'identity': 'e'*64})
+        self.assertEqual(code, 200)
+        def action(token, name='poll', target='', invitation=''):
+            return self.request('POST', '/v2/link', dict(action=name, target=target, invitation=invitation), token)
+        self.assertEqual(action(None)[0], 400)
+        self.assertEqual(action(a['token'], 'invite', 'e'*64)[1]['state'], 'outgoing')
+        invitation = action(b['token'])[1]['invitation']
+        self.assertEqual(action(b['token'], 'accept', invitation=invitation)[1]['state'], 'linked')
+        self.assertEqual(action(a['token'])[1]['state'], 'linked')
+        action(b['token'], 'close')
+        self.assertEqual(action(a['token'])[1]['state'], 'idle')
+        action(a['token'], 'close')
+        server.rates.clear()
+
     def test_rejects_commands_and_coordinates(self):
         self.assertEqual(self.request('POST', '/v1/ready', {'command': '/dance'})[0], 400)
         self.assertEqual(self.request('POST', '/v1/ready', {'self': 'a'*64, 'target': 'b'*64, 'animation': 'c'*64, 'align': True, 'x': 12})[0], 400)

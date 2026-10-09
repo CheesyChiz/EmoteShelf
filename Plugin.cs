@@ -121,6 +121,7 @@ public sealed partial class Plugin : IDalamudPlugin
         Pi.UiBuilder.OpenConfigUi += OpenSettings;
         Pi.UiBuilder.OpenMainUi += OpenSettings;
         Framework.Update += Update;
+        ContextMenus.OnMenuOpened += OnPairContextMenu;
     }
 
     private void Save() => Pi.SavePluginConfig(config);
@@ -323,6 +324,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void Update(IFramework _)
     {
+        UpdateLink();
         UpdatePair();
         if (manualPoseBookmark is { } manual && Environment.TickCount64 >= manualPoseReturnAt && manualPoseTarget >= 0)
         {
@@ -563,6 +565,7 @@ public sealed partial class Plugin : IDalamudPlugin
         if (settingsOpen) DrawSettings();
         if (config.OverlayVisible) DrawOverlay();
         DrawPairWindow();
+        DrawLinkNotice();
     }
 
     private void DrawOverlay()
@@ -1391,6 +1394,8 @@ public sealed partial class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        ContextMenus.OnMenuOpened -= OnPairContextMenu;
+        StopLink();
         CancelPair();
         pairAlignment?.Dispose();
         pendingCommand = "";

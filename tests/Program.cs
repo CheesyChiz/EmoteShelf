@@ -148,7 +148,8 @@ if (compatibility.Matches("chara/human/c0801/animation/a0001/bt_common/emote/tes
     new PapCompatibility([]).Matches("anything", 1401) is not null)
     throw new Exception("PAP fallback filtering regression.");
 Console.WriteLine("PAP redirect and unknown-path filtering tests passed.");
-if (args.Contains("--pair-relay-test")) await PairClientTests.Live();
+if (args.Contains("--link-relay-test")) await LinkClientTests.Live();
+else if (args.Contains("--pair-relay-test")) await PairClientTests.Live();
 else if (args.Length == 1)
 {
     var realMod = Path.GetFullPath(args[0]);

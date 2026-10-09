@@ -71,9 +71,8 @@ public sealed partial class Plugin
         {
             if (!config.PairEnabled) throw new InvalidOperationException(T("Включи экспериментальный запуск в паре в настройках.", "Enable experimental pair launch in Settings."));
             if (!LightlessLoaded()) throw new InvalidOperationException(T("Для запуска в паре нужен загруженный Lightless Sync. Обычные эмоции работают без него.", "Pair launch requires loaded Lightless Sync. Solo playback does not."));
-            if (Objects.LocalPlayer is not { } local || Targets.Target is not IPlayerCharacter target ||
-                target.GameObjectId == local.GameObjectId || target.TargetObjectId != local.GameObjectId)
-                throw new InvalidOperationException(T("Возьмите друг друга в таргет.", "Both players must target each other."));
+            if (Objects.LocalPlayer is not { } local || LinkedPartner is not { } target || target.GameObjectId == local.GameObjectId)
+                throw new InvalidOperationException(T("Сначала пригласи партнёра через контекстное меню и дождись принятия. Партнёр должен быть рядом.", "Invite a partner through the context menu and wait for acceptance. Your partner must be nearby."));
             if (!LightlessHandles(target.Address)) throw new InvalidOperationException(T("Lightless не сообщает, что обрабатывает выбранного партнёра. Сначала установите синхронизацию в Lightless.", "Lightless does not report handling this partner. Set up synchronization in Lightless first."));
             if (!CanPair(local) || !CanPair(target))
                 throw new InvalidOperationException(T("Сначала оба встаньте и остановите эмоции. Запуск в паре недоступен в бою, на маунте или при касте.", "Both players must stand and stop their emotes first. Pair launch is unavailable in combat, mounted or while casting."));
@@ -145,8 +144,8 @@ public sealed partial class Plugin
             var now = Environment.TickCount64;
             var snapshot = pairSession.Snapshot;
             if (!config.PairEnabled || now >= pairDeadline) throw new InvalidOperationException(T("Ожидание пары отменено или истекло.", "Pair launch cancelled or timed out."));
-            if (Objects.LocalPlayer is not { } local || Targets.Target is not IPlayerCharacter target ||
-                target.GameObjectId != pairTargetId || target.TargetObjectId != local.GameObjectId ||
+            if (Objects.LocalPlayer is not { } local || LinkedPartner is not { } target ||
+                target.GameObjectId != pairTargetId ||
                 PairIdentity(local) != pairSelf || PairIdentity(target) != pairOther)
                 throw new InvalidOperationException(T("Пара отменена: таргет, персонаж или зона изменились.", "Pair cancelled: target, character or zone changed."));
             if (!LightlessHandles(target.Address)) throw new InvalidOperationException(T("Lightless больше не обрабатывает партнёра; запуск отменён.", "Lightless no longer handles the partner; launch cancelled."));
@@ -226,12 +225,13 @@ public sealed partial class Plugin
 
     private void DrawPairSettings()
     {
-        if (ImGui.Checkbox(T("Запуск в паре — экспериментально", "Pair launch — experimental"), ref config.PairEnabled)) { CancelPair(); Save(); }
+        if (ImGui.Checkbox(T("Запуск в паре — экспериментально", "Pair launch — experimental"), ref config.PairEnabled)) { StopLink(); Save(); }
         if (!config.PairEnabled) return;
+        DrawLinkSettings();
         ImGui.TextWrapped(LightlessLoaded() ? T("Lightless Sync загружен. Перед запуском дождитесь завершения синхронизации у обоих.", "Lightless Sync is loaded. Wait for synchronization to finish on both sides before launch.") :
             T("Требуется Lightless Sync у обоих участников. Одиночные эмоции его не требуют.", "Lightless Sync is required for both participants. Solo emotes do not require it."));
-        ImGui.TextWrapped(T("Оба берут друг друга в таргет, выбирают свои роли одного мода и нажимают «В паре» или Shift+иконку. Нужен интернет. Сервер видит IP и хеши персонажей/мода; личность игрового персонажа не проверяется сервером. Только с доверенным партнёром.",
-            "Both players target each other, choose their own roles of the same mod, then click Pair or Shift+icon. Internet required. The relay sees IP addresses and character/mod hashes; game identity is not authenticated by the relay. Use with trusted partners only."));
+        ImGui.TextWrapped(T("После принятия приглашения каждый выбирает свою роль одного мода и нажимает «В паре» или Shift+иконку. Таргет держать не нужно. Используется сервер Emote Shelf: он видит IP и хеши персонажей/мода; личность игрового персонажа не проверяется сервером. Только с доверенным партнёром.",
+            "After accepting an invitation, each player chooses their role of the same mod and clicks Pair or Shift+icon. Keeping a target is not required. The Emote Shelf relay sees IP addresses and character/mod hashes; game identity is not authenticated. Use with trusted partners only."));
         if (ImGui.Checkbox(T("Разрешить короткий подход и выравнивание перед запуском", "Allow a short approach and alignment before launch"), ref config.PairAlign)) { CancelPair(); Save(); }
         ImGui.TextWrapped(T("Выравнивание — только с разрешения обоих, до 2 ялмов, без телепортации. Один стоит, второй подходит. Это общий запуск команд, не точная синхронизация кадров; sit/idle особенно требуют проверки.",
             "Alignment requires both players to opt in, within 2 yalms, without teleporting. One stands still, the other approaches. This is a shared command start, not frame-accurate synchronization; sit/idle particularly need testing."));

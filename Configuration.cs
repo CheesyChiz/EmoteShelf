@@ -22,6 +22,8 @@ public sealed class Configuration : IPluginConfiguration
     public bool ManualPoseMigration;
     public bool PairEnabled;
     public bool PairAlign;
+    public float PairNoticeX = -1;
+    public float PairNoticeY = -1;
     public HashSet<string> ClosedFolders = new(StringComparer.OrdinalIgnoreCase);
     public string Language = "";
 }
