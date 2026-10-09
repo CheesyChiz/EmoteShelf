@@ -137,6 +137,11 @@ if (PairRules.AngleDistance(MathF.PI - .01f, -MathF.PI + .01f) > .021f ||
     !float.IsPositiveInfinity(PairRules.AngleDistance(float.NaN, 0)))
     throw new Exception("Pair heading wrap/invalid-angle regression");
 Console.WriteLine("Pair heading wraparound and invalid-angle tests passed.");
+if (!PairRules.Aligned(System.Numerics.Vector3.Zero, 0, new(.005f, 0, 0), .005f) ||
+    PairRules.Aligned(System.Numerics.Vector3.Zero, 0, new(.02f, 0, 0), 0) ||
+    PairRules.Aligned(System.Numerics.Vector3.Zero, 0, System.Numerics.Vector3.Zero, .02f) ||
+    PairRules.Aligned(System.Numerics.Vector3.Zero, 0, new(0, .02f, 0), 0))
+    throw new Exception("Alignment position/height/facing threshold regression");
 var plt = new byte[512];
 void Half(int at, ushort value) => BitConverter.GetBytes(value).CopyTo(plt, at);
 void Word(int at, uint value) => BitConverter.GetBytes(value).CopyTo(plt, at);

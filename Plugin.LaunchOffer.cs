@@ -143,7 +143,7 @@ public sealed partial class Plugin
                     }
                 }
             }
-            ImGui.TextWrapped(T("Принятие подтверждает запуск и, если разрешено у обоих, подход к партнёру.", "Accepting confirms playback and, if enabled by both players, approach/alignment."));
+            ImGui.TextWrapped(T("Принятие разрешает обязательное выравнивание: подход, точную доводку позиции и угла, затем запуск.", "Accepting authorizes required alignment: approach, fine position/facing correction, then playback."));
             ImGui.BeginDisabled(offerDraft is null || pairSession is not null || LinkedPartner is null);
             if (ImGui.Button(T("Принять и запустить", "Accept and start")))
             {

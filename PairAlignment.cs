@@ -6,7 +6,7 @@ using FFXIVClientStructs.FFXIV.Client.Game.Control;
 
 namespace EmoteShelf;
 
-// Local opt-in approach only. Never writes position or accepts remote coordinates.
+// Short local approach followed by bounded fine correction. No remote coordinates.
 internal sealed unsafe class PairAlignment : IDisposable
 {
     private delegate void WalkInput(nint context, float* lateral, float* forward, float* turn, byte* mode, byte* extra, byte additive);
@@ -17,6 +17,8 @@ internal sealed unsafe class PairAlignment : IDisposable
     private long expires;
     private long lastProgress;
     private float bestDistance;
+    private bool correcting;
+    private int correctionFrames, stableFrames;
     public bool Active { get; private set; }
     public bool Arrived { get; private set; }
     public string Error { get; private set; } = "";
@@ -40,9 +42,28 @@ internal sealed unsafe class PairAlignment : IDisposable
         Arrived = false;
         Error = "";
         Active = true;
+        correcting = false;
+        correctionFrames = stableFrames = 0;
     }
 
-    public void Cancel() { Active = false; Arrived = false; }
+    public void Cancel() { Active = false; Arrived = false; correcting = false; }
+
+    // Once per framework frame, not per input-hook invocation. Require observed
+    // stability on subsequent frames; a position write itself is not confirmation.
+    public void Update()
+    {
+        if (!Active || !correcting) return;
+        if (objects.LocalPlayer is not { } player || Environment.TickCount64 >= expires)
+        { Fail("Alignment confirmation timed out."); return; }
+        var character = (Character*)player.Address;
+        if (character->Mode != CharacterModes.Normal || Vector3.Distance(player.Position, destination) > .05f)
+        { Fail("Fine alignment cancelled: character moved or changed state."); return; }
+        stableFrames = PairRules.Aligned(player.Position, player.Rotation, destination, facing) ? stableFrames + 1 : 0;
+        if (stableFrames >= 3) { Active = false; Arrived = true; return; }
+        if (++correctionFrames > 12) { Fail("Position/facing did not stabilize; pair launch cancelled."); return; }
+        character->GameObject.SetPosition(destination.X, destination.Y, destination.Z);
+        character->GameObject.SetRotation(facing);
+    }
 
     private void Fail(string reason) { Cancel(); Error = reason; }
 
@@ -52,6 +73,7 @@ internal sealed unsafe class PairAlignment : IDisposable
         if (!Active) return;
         if (*lateral != 0 || *forward != 0 || *turn != 0) { Fail("Alignment cancelled by movement input."); return; }
         if (additive != 0) return;
+        if (correcting) return;
         var now = Environment.TickCount64;
         if (now >= expires) { Fail("Alignment timed out; move closer and retry."); return; }
         if (objects.LocalPlayer is not { } player) { Fail("Character unavailable."); return; }
@@ -62,9 +84,9 @@ internal sealed unsafe class PairAlignment : IDisposable
         var distance = new Vector2(delta.X, delta.Z).Length();
         if (distance <= .03f)
         {
-            character->GameObject.SetRotation(facing);
-            Active = false;
-            Arrived = true;
+            if (Vector3.Distance(player.Position, destination) > .05f)
+            { Fail("Too much height difference for fine alignment."); return; }
+            correcting = true;
             return;
         }
         if (distance < bestDistance - .01f) { bestDistance = distance; lastProgress = now; }

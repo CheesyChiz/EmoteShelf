@@ -6,6 +6,8 @@ namespace EmoteShelf;
 
 public static class PairRules
 {
+    public static bool Aligned(Vector3 a, float yawA, Vector3 b, float yawB)
+        => Vector3.Distance(a, b) <= .01f && AngleDistance(yawA, yawB) <= .01f;
     public static float AngleDistance(float a, float b)
         => float.IsFinite(a) && float.IsFinite(b) ? MathF.Abs(MathF.IEEERemainder(a - b, MathF.Tau)) : float.PositiveInfinity;
     public static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();

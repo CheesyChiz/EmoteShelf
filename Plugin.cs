@@ -326,6 +326,7 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         if (pairSession is null && pendingPoseIndex < 0) pairUntargetedPlayback = false;
         UpdateLink();
+        pairAlignment?.Update();
         UpdatePair();
         if (manualPoseBookmark is { } manual && Environment.TickCount64 >= manualPoseReturnAt && manualPoseTarget >= 0)
         {
@@ -393,7 +394,8 @@ public sealed partial class Plugin : IDalamudPlugin
                 {
                     pairHeldCommand = command;
                     pairPreparing = false;
-                    pairSession.Prepared();
+                    pairConfirmUntil = Environment.TickCount64 + 5000;
+                    // UpdatePair confirms position/facing after redraw before readiness.
                 }
                 else DispatchPreparedCommand(command);
             }
