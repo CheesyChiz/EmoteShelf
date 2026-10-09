@@ -121,6 +121,17 @@ foreach (var known in new[] { false, true })
         throw new Exception("Pose preparation or manual/automatic separation regressed.");
 }
 Console.WriteLine("Manual pose entry and retained ground-sit tests passed.");
+if (PairRules.Identity("Alice", 1, 2, 3) != PairRules.Identity(" ALICE ", 1, 2, 3) ||
+    PairRules.Identity("Alice", 1, 2, 3) == PairRules.Identity("Alice", 2, 2, 3) ||
+    PairRules.Identity("Alice", 1, 2, 3) == PairRules.Identity("Alice", 1, 2, 4) ||
+    PairRules.StartTime(100, 200, 1000) != 1150 ||
+    PairRules.Nearby(System.Numerics.Vector3.Zero, new(0, 1, 0)) ||
+    PairRules.Nearby(System.Numerics.Vector3.Zero, new(float.NaN, 0, 0)) ||
+    !PairRules.PeerMayHaveStarted("scheduled", 1000, 990) || PairRules.PeerMayHaveStarted("paired", 1000, 990))
+    throw new Exception("Pair identity, clock compensation, range or start-boundary regression.");
+try { PairRules.StartTime(100, 800, 2000); throw new Exception("High-latency sample was accepted."); }
+catch (InvalidOperationException) { }
+await PairClientTests.Run();
 var plt = new byte[512];
 void Half(int at, ushort value) => BitConverter.GetBytes(value).CopyTo(plt, at);
 void Word(int at, uint value) => BitConverter.GetBytes(value).CopyTo(plt, at);
@@ -137,7 +148,8 @@ if (compatibility.Matches("chara/human/c0801/animation/a0001/bt_common/emote/tes
     new PapCompatibility([]).Matches("anything", 1401) is not null)
     throw new Exception("PAP fallback filtering regression.");
 Console.WriteLine("PAP redirect and unknown-path filtering tests passed.");
-if (args.Length == 1)
+if (args.Contains("--pair-relay-test")) await PairClientTests.Live();
+else if (args.Length == 1)
 {
     var realMod = Path.GetFullPath(args[0]);
     var realName = Path.GetFileName(realMod);

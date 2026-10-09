@@ -1,9 +1,17 @@
 anarchyclan.ru {
-    # Staging: only expose health until client consent/cancellation is integrated.
-    handle /health {
-        reverse_proxy 127.0.0.1:8765
+    @pair path /health /v1/ready /v1/session /v1/prepared /v1/finished
+    handle @pair {
+        request_body {
+            max_size 2KB
+        }
+        reverse_proxy 127.0.0.1:8765 {
+            header_up X-Forwarded-For {remote_host}
+            transport http {
+                response_header_timeout 5s
+            }
+        }
     }
     handle {
-        respond "Emote Shelf synchronization is not available yet." 503
+        respond "Emote Shelf experimental pair relay." 200
     }
 }

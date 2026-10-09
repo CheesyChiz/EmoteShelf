@@ -1,11 +1,11 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.3.0.1</Version>
+    <Version>0.3.1.0</Version>
     <Author>CheesyChiz</Author>
     <Name>Emote Shelf</Name>
     <InternalName>EmoteShelf</InternalName>
     <Punchline>One-click bookmarks for Penumbra emote mods.</Punchline>
-    <Description>Browse Penumbra emote mods in local folders, preview variants, and pin favorites to an icon panel. Supports ground-sit and standing-idle pose slots, with temporary mod priority and effective-file verification. Open with /es or /eshelf. Requires Penumbra.</Description>
+    <Description>Browse Penumbra emote mods, choose variants, and pin favorites to an icon panel. Supports ground-sit and standing-idle pose slots. Experimental pair launch and optional nearby alignment require Lightless Sync with your partner. Open with /es or /eshelf. Solo playback requires only Penumbra.</Description>
     <Tags>emote;dance;penumbra;overlay</Tags>
     <RepoUrl>https://github.com/CheesyChiz/EmoteShelf</RepoUrl>
     <IconUrl>https://raw.githubusercontent.com/CheesyChiz/EmoteShelf/main/assets/icon.png</IconUrl>

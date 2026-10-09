@@ -20,6 +20,8 @@ public sealed class Configuration : IPluginConfiguration
     public bool English;
     public bool AutomaticPose;
     public bool ManualPoseMigration;
+    public bool PairEnabled;
+    public bool PairAlign;
     public HashSet<string> ClosedFolders = new(StringComparer.OrdinalIgnoreCase);
     public string Language = "";
 }
