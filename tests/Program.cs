@@ -105,6 +105,22 @@ if (FolderTree.Parent("Dance/Pair/Favorites") != "Dance/Pair" || FolderTree.Name
     !FolderTree.Ancestors("Dance/Pair/Favorites").SequenceEqual(["Dance/Pair", "Dance"]))
     throw new Exception("Nested folder path regression.");
 Console.WriteLine("Nested folder rename/move/ancestor tests passed.");
+if (PosePlayback.ShouldStandUp("/groundsit", true) || !PosePlayback.ShouldStandUp("/dance", true))
+    throw new Exception("Pose playback sent an unsolicited step or unnecessarily reseated the player.");
+foreach (var ground in new[] { false, true })
+foreach (var active in new[] { false, true })
+foreach (var automatic in new[] { false, true })
+foreach (var known in new[] { false, true })
+{
+    var plan = PosePlayback.Prepare(ground, active, automatic, known);
+    if (plan.Cycle != (automatic && known) || plan.SetSavedGroundSlot != (automatic && known && ground && !active) ||
+        plan.SettleMilliseconds != (ground && !active ? 500 : 150) ||
+        (active && plan.Action != PosePlayback.Entry.RefreshActivePose) ||
+        (!active && ground && plan.Action != PosePlayback.Entry.EnterGroundSit) ||
+        (!active && !ground && plan.Action != PosePlayback.Entry.PrepareIdle))
+        throw new Exception("Pose preparation or manual/automatic separation regressed.");
+}
+Console.WriteLine("Manual pose entry and retained ground-sit tests passed.");
 var plt = new byte[512];
 void Half(int at, ushort value) => BitConverter.GetBytes(value).CopyTo(plt, at);
 void Word(int at, uint value) => BitConverter.GetBytes(value).CopyTo(plt, at);

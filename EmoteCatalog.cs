@@ -38,6 +38,8 @@ public sealed class EmoteCatalog
 
     public bool IsKnownCommand(string command) => commands.ContainsKey(command);
 
+    public uint IconFor(string command) => commands.TryGetValue(command, out var emote) ? emote.Icon : 0;
+
     public (string Name, string Command, uint Icon)? Resolve(string gamePath)
     {
         var file = Path.GetFileNameWithoutExtension(gamePath).ToLowerInvariant();

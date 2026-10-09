@@ -56,7 +56,6 @@ public sealed class Plugin : IDalamudPlugin
     private int pendingPoseIndex = -1;
     private EmoteController.PoseType pendingPoseType = EmoteController.PoseType.GroundSit;
     private long poseAt;
-    private long poseReadyDeadline;
     private int poseAttempts;
     private bool initialScanPending = true;
     private string pendingModDirectory = "";
@@ -81,6 +80,7 @@ public sealed class Plugin : IDalamudPlugin
     private int folderEditMode;
     private Bookmark? manualPoseBookmark;
     private int manualPoseTarget = -1;
+    private long manualPoseReturnAt;
     private Bookmark? launchingBookmark;
     private bool selectEmotesTab;
     private string rightClickMod = "";
@@ -220,7 +220,7 @@ public sealed class Plugin : IDalamudPlugin
         if (selected is null) { status = T("Мод не найден в Penumbra; обнови список.", "Mod not found in Penumbra; refresh the list."); return; }
         try
         {
-            if (IsGroundSitting())
+            if (PosePlayback.ShouldStandUp(bookmark.Command, IsGroundSitting()))
             {
                 StandUpFromGroundSit();
                 waitingForStand = bookmark;
@@ -263,7 +263,7 @@ public sealed class Plugin : IDalamudPlugin
                 throw new InvalidOperationException(string.Format(T("Не удалось переключить {0}: {1}", "Could not switch {0}: {1}"), selected.Name, ecSet));
             redrawCompleted = false;
             redrawDeadline = Environment.TickCount64 + 1600;
-            try { redraw.Invoke(player.ObjectIndex, RedrawType.Redraw); }
+            try { if (!IsPoseCommand(bookmark.Command)) redraw.Invoke(player.ObjectIndex, RedrawType.Redraw); }
             catch (Exception ex) { redrawCompleted = true; Log.Warning(ex, "Redraw failed; animation may remain cached"); }
             pendingCommand = bookmark.Command.Trim();
             pendingModDirectory = selected.Directory;
@@ -298,7 +298,7 @@ public sealed class Plugin : IDalamudPlugin
                     pendingExpectedFiles[gamePath] = absoluteFile;
                 }
             }
-            sendAt = Environment.TickCount64 + 150;
+            sendAt = Environment.TickCount64 + (IsPoseCommand(bookmark.Command) ? 300 : 150);
             pendingPoseIndex = bookmark.PoseIndex ?? GetPoseIndex(selected);
             pendingPoseType = bookmark.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase)
                 ? EmoteController.PoseType.GroundSit : EmoteController.PoseType.Idle;
@@ -321,6 +321,11 @@ public sealed class Plugin : IDalamudPlugin
 
     private void Update(IFramework _)
     {
+        if (manualPoseBookmark is { } manual && Environment.TickCount64 >= manualPoseReturnAt && manualPoseTarget >= 0)
+        {
+            var type = manual.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? EmoteController.PoseType.GroundSit : EmoteController.PoseType.Idle;
+            if (CurrentPoseIndex(type) == manualPoseTarget) manualPoseBookmark = null;
+        }
         if (initialScanPending && Objects.LocalPlayer is not null)
         {
             initialScanPending = false;
@@ -331,7 +336,7 @@ public sealed class Plugin : IDalamudPlugin
             var now = Environment.TickCount64;
             if (!IsGroundSitting())
             {
-                if (standSettledAt == 0) standSettledAt = now + 500;
+                if (standSettledAt == 0) standSettledAt = now + 250;
                 if (now >= standSettledAt)
                 {
                     waitingForStand = null;
@@ -351,8 +356,8 @@ public sealed class Plugin : IDalamudPlugin
         }
         if (pendingCommand.Length > 0 && Environment.TickCount64 >= sendAt)
         {
-            if (!redrawCompleted && Environment.TickCount64 < redrawDeadline) return;
-            if (!redrawCompleted) Log.Warning("Penumbra redraw confirmation timed out; continuing with verified mod paths");
+            if (!IsPoseCommand(pendingCommand) && !redrawCompleted && Environment.TickCount64 < redrawDeadline) return;
+            if (!IsPoseCommand(pendingCommand) && !redrawCompleted) Log.Warning("Penumbra redraw confirmation timed out; continuing with verified mod paths");
             var command = pendingCommand;
             pendingCommand = "";
             try
@@ -378,15 +383,23 @@ public sealed class Plugin : IDalamudPlugin
                         !Path.GetFullPath(effectivePath).Equals(expectedFile, StringComparison.OrdinalIgnoreCase))
                         Log.Debug("Same-mod option override for {GamePath}: {EffectivePath}", gamePath, effectivePath);
                 }
-                if (!(IsStandingPoseCommand(command) && pendingPoseIndex >= 0))
-                    ExecutePreparedEmote(command);
-                if (pendingPoseIndex >= 0)
+                if (IsPoseCommand(command))
                 {
+                    var plan = PosePlayback.Prepare(command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase),
+                        CurrentPoseIndex(pendingPoseType) >= 0, config.AutomaticPose, pendingPoseIndex >= 0);
+                    if (plan.Action == PosePlayback.Entry.RefreshActivePose)
+                    {
+                        if (Objects.LocalPlayer is { } local) redraw.Invoke(local.ObjectIndex, RedrawType.Redraw);
+                    }
+                    else if (plan.Action == PosePlayback.Entry.EnterGroundSit)
+                        ExecutePreparedEmote(command, plan.SetSavedGroundSlot);
                     manualPoseBookmark = launchingBookmark;
                     manualPoseTarget = pendingPoseIndex;
-                    poseAt = Environment.TickCount64 + 100;
-                    poseReadyDeadline = Environment.TickCount64 + 5000;
+                    manualPoseReturnAt = Environment.TickCount64 + plan.SettleMilliseconds;
+                    poseAt = manualPoseReturnAt;
+                    if (!plan.Cycle) pendingPoseIndex = -1;
                 }
+                else ExecuteEmote(command);
             }
             catch (Exception ex)
             {
@@ -397,13 +410,13 @@ public sealed class Plugin : IDalamudPlugin
             finally { pendingModDirectory = ""; pendingOptions = null; pendingExpectedPaths = []; pendingExpectedFiles.Clear(); pendingExpectedModRoot = ""; }
         }
         if (pendingPoseIndex < 0 || pendingCommand.Length > 0 || Environment.TickCount64 < poseAt) return;
-          if (!config.AutomaticPose) { pendingPoseIndex = -1; return; }
+        if (!config.AutomaticPose) { pendingPoseIndex = -1; return; }
         try
         {
             var currentPose = CurrentPoseIndex(pendingPoseType);
             if (currentPose < 0)
             {
-                if (Environment.TickCount64 >= poseReadyDeadline)
+                if (++poseAttempts >= 8)
                 {
                     pendingPoseIndex = -1;
                     status = pendingPoseType == EmoteController.PoseType.GroundSit
@@ -412,7 +425,7 @@ public sealed class Plugin : IDalamudPlugin
                             "Standing idle is unavailable: stop the previous looping emote or movement, then retry.");
                     status += " " + PoseDiagnostics();
                 }
-                else poseAt = Environment.TickCount64 + 200;
+                else poseAt = Environment.TickCount64 + 100;
                 return;
             }
             var highestPose = EmoteController.GetAvailablePoses(pendingPoseType);
@@ -423,22 +436,23 @@ public sealed class Plugin : IDalamudPlugin
                 pendingPoseIndex = -1;
                 return;
             }
-              if (currentPose == pendingPoseIndex)
+            if (currentPose == pendingPoseIndex)
             {
-                  status = string.Format(T("Игра сообщает слот {0:00}.", "Game reports slot {0:00}."), currentPose);
-                  Log.Information("Pose confirmed: {State}", PoseDiagnostics());
+                status = string.Format(T("Игра сообщает слот {0:00}.", "Game reports slot {0:00}."), currentPose);
+                Log.Information("Pose confirmed: {State}", PoseDiagnostics());
                 pendingPoseIndex = -1;
                 return;
             }
-              if (poseAttempts++ >= 8)
+            if (poseAttempts++ >= 8)
             {
                 pendingPoseIndex = -1;
                 status = T("Не удалось переключить нужную позу. Попробуй /cpose вручную.", "Could not reach the target pose. Try /cpose manually.");
                 return;
             }
-              ExecuteEmote("/cpose");
+            Log.Information("Automatic /cpose: target={Target}, current={Current}, attempt={Attempt}, tick={Tick}", pendingPoseIndex, currentPose, poseAttempts, Environment.TickCount64);
+            ExecuteEmote("/cpose");
             status = string.Format(T("Переключаю позу {0} → {1} (шаг {2}).", "Changing pose {0} → {1} (step {2})."),
-                currentPose + 1, pendingPoseIndex + 1, poseAttempts);
+                currentPose, pendingPoseIndex, poseAttempts);
             poseAt = Environment.TickCount64 + 100;
         }
         catch (Exception ex) { pendingPoseIndex = -1; status = ex.Message; Log.Warning(ex, "Pose switch failed"); }
@@ -450,15 +464,14 @@ public sealed class Plugin : IDalamudPlugin
         if (player is null) return -1;
         var character = (Character*)player.Address;
         var controller = &character->EmoteController;
-          if (poseType == EmoteController.PoseType.GroundSit)
+        if (poseType == EmoteController.PoseType.GroundSit)
         {
-              return IsGroundSitting() && controller->GetPoseKind() == (int)poseType
+            return character->Mode == CharacterModes.InPositionLoop && character->ModeParam == 1
                 ? controller->CPoseState : -1;
         }
         // A previous looping emote can leave an idle pose number cached in the
         // controller even though the character is not actually standing idle.
-          return character->Mode == CharacterModes.Normal &&
-                 controller->GetPoseKind() == (int)poseType
+        return character->Mode == CharacterModes.Normal
             ? controller->CPoseState : -1;
     }
 
@@ -472,12 +485,12 @@ public sealed class Plugin : IDalamudPlugin
                character->ModeParam == 1;
     }
 
-    private unsafe void ExecutePreparedEmote(string command)
+    private unsafe void ExecutePreparedEmote(string command, bool setSavedSlot)
     {
-        // Initial ground-sit selection happens after redraw and before entering the
+        // Initial ground-sit selection happens just before entering the
         // stance, never while already seated. Active poses use ordinary /cpose.
         var state = PlayerState.Instance();
-        if (!config.AutomaticPose || !command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ||
+        if (!setSavedSlot || !config.AutomaticPose || !command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ||
             pendingPoseIndex < 0 || pendingPoseIndex > EmoteController.GetAvailablePoses(EmoteController.PoseType.GroundSit) ||
             IsGroundSitting() || state == null)
         { ExecuteEmote(command); return; }
@@ -551,12 +564,15 @@ public sealed class Plugin : IDalamudPlugin
         {
             var bookmark = config.Bookmarks[i];
             if (i % columns != 0) ImGui.SameLine();
-            var icon = Textures.GetFromGameIcon(new GameIconLookup(bookmark.IconId == 0 ? 19u : bookmark.IconId)).GetWrapOrDefault();
-            ImGui.PushID(i);
             var isPose = ReferenceEquals(manualPoseBookmark, bookmark);
-            var clicked = isPose ? ImGui.Button("↻##cpose", size) : icon is not null
+            var poseIcon = catalog?.IconFor("/changepose") ?? 0;
+            if (poseIcon == 0) poseIcon = catalog?.IconFor("/cpose") ?? 0;
+            var iconId = isPose ? poseIcon : bookmark.IconId == 0 ? 19u : bookmark.IconId;
+            var icon = iconId == 0 ? null : Textures.GetFromGameIcon(new GameIconLookup(iconId)).GetWrapOrDefault();
+            ImGui.PushID(i);
+            var clicked = icon is not null
                 ? ImGui.ImageButton(icon.Handle, size)
-                : ImGui.Button(bookmark.Command, size);
+                : ImGui.Button(isPose ? "↻##cpose" : bookmark.Command, size);
             if (clicked)
             {
                 if (ImGui.GetIO().KeyCtrl && ImGui.GetIO().KeyShift)
@@ -566,7 +582,7 @@ public sealed class Plugin : IDalamudPlugin
                     Save();
                     i--;
                 }
-                else if (isPose) { pendingPoseIndex = -1; ExecuteEmote("/cpose"); }
+                else if (isPose) { pendingPoseIndex = -1; manualPoseReturnAt = Environment.TickCount64 + 100; ExecuteEmote("/cpose"); }
                 else Play(bookmark);
             }
             if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
@@ -586,11 +602,6 @@ public sealed class Plugin : IDalamudPlugin
             ReorderBookmarkDragDrop(i);
             ImGui.PopID();
         }
-        if (manualPoseBookmark is { } poseBookmark)
-        {
-            ImGui.TextUnformatted(ManualPoseHint(poseBookmark));
-            if (ImGui.SmallButton(T("Готово", "Done"))) { manualPoseBookmark = null; pendingPoseIndex = -1; }
-        }
         ImGui.End();
         ImGui.PopStyleVar();
     }
@@ -600,7 +611,7 @@ public sealed class Plugin : IDalamudPlugin
         var type = bookmark.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase)
             ? EmoteController.PoseType.GroundSit : EmoteController.PoseType.Idle;
         var current = CurrentPoseIndex(type);
-        return $"/cpose · {T("слот игры", "reported slot")}: {(current < 0 ? "?" : current.ToString("00"))} → {(manualPoseTarget < 0 ? "?" : manualPoseTarget.ToString("00"))}\n{T("Нажимай ↻ до нужной позы, затем «Готово».", "Click ↻ until the desired pose, then Done.")}";
+        return $"/cpose · {T("слот игры", "reported slot")}: {(current < 0 ? "?" : current.ToString("00"))} → {(manualPoseTarget < 0 ? "?" : manualPoseTarget.ToString("00"))}\n{T("Нажимай до нужной позы. Иконка вернётся автоматически.", "Click to reach the target pose. The icon restores automatically.")}";
     }
 
     private void DrawSettings()
@@ -1282,7 +1293,8 @@ public sealed class Plugin : IDalamudPlugin
 
     private void DrawAdvancedTab()
     {
-        if (ImGui.Checkbox(T("Автовыбор позы (экспериментально, недостаточно протестировано)", "Automatic pose selection (experimental, not fully tested)"), ref config.AutomaticPose)) Save();
+        if (ImGui.Checkbox(T("Автовыбор позы (экспериментально, недостаточно протестировано)", "Automatic pose selection (experimental, not fully tested)"), ref config.AutomaticPose))
+        { pendingPoseIndex = -1; Save(); }
         var languages = new[] { ("ru", "Русский"), ("en", "English"), ("ja", "日本語"), ("de", "Deutsch"), ("fr", "Français") };
         var selectedLanguage = languages.FirstOrDefault(x => x.Item1 == config.Language).Item2 ?? "Русский";
         ImGui.SetNextItemWidth(180);

@@ -9,6 +9,7 @@
     <Compile Include="../PoseSlot.cs" Link="PoseSlot.cs" />
     <Compile Include="../ResolvedAnimation.cs" Link="ResolvedAnimation.cs" />
     <Compile Include="../FolderTree.cs" Link="FolderTree.cs" />
+    <Compile Include="../PosePlayback.cs" Link="PosePlayback.cs" />
     <Compile Include="../PapCompatibility.cs" Link="PapCompatibility.cs" />
     <Compile Include="../ModScanner.cs" Link="ModScanner.cs" />
   </ItemGroup>
