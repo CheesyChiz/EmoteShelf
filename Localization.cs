@@ -14,6 +14,7 @@ internal static class Localization
              "Trouvez une emote, testez-la avec Aperçu, puis ajoutez-la au panneau. Le raccourci est enregistré automatiquement."),
         ["Refresh list"] = ("一覧を更新", "Liste aktualisieren", "Actualiser la liste"),
         ["Search emote or mod"] = ("エモート・MODを検索", "Emote oder Mod suchen", "Rechercher une emote ou un mod"),
+        ["Restore hidden mods on the Settings tab."] = ("非表示のMODは設定タブから戻せます。", "Ausgeblendete Mods lassen sich unter Einstellungen wiederherstellen.", "Restaurez les mods masqués dans Paramètres."),
         ["Preview"] = ("プレビュー", "Vorschau", "Aperçu"),
         ["Add to panel"] = ("パネルに追加", "Zur Leiste hinzufügen", "Ajouter au panneau"),
         ["Mod variants"] = ("MODのバリエーション", "Mod-Varianten", "Variantes du mod"),
@@ -23,6 +24,10 @@ internal static class Localization
              "Ajouté au panneau. Modifiez sa disposition dans l'onglet Panneau."),
         ["Show in-game panel"] = ("ゲーム内パネルを表示", "Leiste im Spiel anzeigen", "Afficher le panneau en jeu"),
         ["Lock position"] = ("位置を固定", "Position sperren", "Verrouiller la position"),
+        ["Target pose"] = ("目標ポーズ", "Zielpose", "Pose cible"),
+        ["Auto"] = ("自動", "Automatisch", "Auto"),
+        ["Pose {0}"] = ("ポーズ {0}", "Pose {0}", "Pose {0}"),
+        ["After /groundsit, changing pose may take a couple of seconds."] = ("/groundsit の後、ポーズ変更には数秒かかることがあります。", "Nach /groundsit kann der Posenwechsel einige Sekunden dauern.", "Après /groundsit, changer de pose peut prendre quelques secondes."),
         ["Icons per row"] = ("1行のアイコン数", "Symbole pro Zeile", "Icônes par ligne"),
         ["Icon size"] = ("アイコンのサイズ", "Symbolgröße", "Taille des icônes"),
         ["Background opacity"] = ("背景の不透明度", "Deckkraft des Hintergrunds", "Opacité du fond"),
@@ -55,6 +60,7 @@ internal static class Localization
         ["Could not read collection priorities: {0}"] = ("コレクションの優先度を読み取れませんでした: {0}", "Prioritäten der Kollektion konnten nicht gelesen werden: {0}", "Impossible de lire les priorités de la collection : {0}"),
         ["Penumbra's maximum priority is already in use."] = ("Penumbraの最大優先度は既に使用されています。", "Die maximale Penumbra-Priorität ist bereits belegt.", "La priorité maximale de Penumbra est déjà utilisée."),
         ["Could not switch {0}: {1}"] = ("{0}に切り替えられませんでした: {1}", "Wechsel zu {0} fehlgeschlagen: {1}", "Impossible d'activer {0} : {1}"),
+        ["Penumbra did not confirm the selected mod; emote was not played."] = ("Penumbraが選択したMODを確認できなかったため、エモートを再生しませんでした。", "Penumbra hat den ausgewählten Mod nicht bestätigt; die Emote wurde nicht abgespielt.", "Penumbra n'a pas confirmé le mod choisi ; l'emote n'a pas été lancée."),
         ["Selected: {0} → {1}"] = ("選択中: {0} → {1}", "Ausgewählt: {0} → {1}", "Sélectionné : {0} → {1}"),
         ["Mod switched, but the emote did not start: {0}"] = ("MODは切り替わりましたが、エモートを開始できませんでした: {0}", "Mod gewechselt, aber die Emote wurde nicht gestartet: {0}", "Mod activé, mais l'emote n'a pas démarré : {0}"),
         ["Mod settings are unavailable: {0}"] = ("MODの設定を利用できません: {0}", "Mod-Einstellungen sind nicht verfügbar: {0}", "Paramètres du mod indisponibles : {0}"),
@@ -101,9 +107,9 @@ internal static class Localization
 
     private static string Help(string language, string fallback) => language switch
     {
-        "ja" => "1. 「エモート」タブで使いたいエモートを探します。プレビューは登録せずに再生します。「パネルに追加」を押すと、現在のMOD設定とともに登録・自動保存されます。バリエーションが検出された場合は「MODのバリエーション」を開いて選べます。\n\n2. ゲーム画面のアイコンをクリックすると再生、Ctrl+Shift+クリックで削除します。プレビューや再生ではPenumbraのMODを一時的に切り替えます。「設定」タブから一時設定を解除できます。\n\n3. 「パネル」タブで配置、アイコンの大きさ、背景の不透明度を調整できます。MODの設定を後から変えた場合は「オプションを更新」で保存済み設定を置き換えてください。複数のオプショングループの組み合わせは自動列挙されないため、Penumbraで組み合わせを設定してから個別に追加してください。\n\nエモートが見つからない場合だけ、「設定」タブでゲーム内コマンドを手入力してください。",
-        "de" => "1. Im Reiter „Emotes“ die gewünschte Emote suchen. „Vorschau“ spielt sie ab, ohne sie hinzuzufügen. „Zur Leiste hinzufügen“ speichert ein dauerhaftes Lesezeichen mit den aktuellen Mod-Optionen. Erkannte Varianten stehen unter „Mod-Varianten“.\n\n2. Ein Klick auf ein Symbol spielt die Emote ab; Strg+Umschalt+Klick entfernt es. Vorschau und Wiedergabe wählen den Mod in Penumbra vorübergehend aus. Diese Auswahl kann unter „Einstellungen“ zurückgesetzt werden.\n\n3. Im Reiter „Leiste“ Anordnung, Symbolgröße und Hintergrund-Deckkraft einstellen. Optionen werden beim Hinzufügen automatisch gespeichert. Nach einer späteren Änderung des Mods ersetzt „Optionen aktualisieren“ den gespeicherten Stand. Kombinationen mehrerer Optionsgruppen werden nicht automatisch aufgelistet: In Penumbra einstellen und jeweils ein eigenes Lesezeichen hinzufügen.\n\nNur wenn eine Emote nicht erkannt wird, ihren Spielbefehl unter „Einstellungen“ von Hand eingeben.",
-        "fr" => "1. Dans l'onglet Emotes, trouvez l'emote voulue. « Aperçu » la lance sans l'ajouter. « Ajouter au panneau » crée un raccourci permanent avec les options actuelles du mod. Les variantes détectées se trouvent sous « Variantes du mod ».\n\n2. Cliquez sur une icône pour jouer l'emote ; Ctrl+Maj+clic la retire. L'aperçu et la lecture sélectionnent temporairement le mod dans Penumbra. Vous pouvez annuler cette sélection dans Paramètres.\n\n3. Dans Panneau, réglez la disposition, la taille des icônes et l'opacité du fond. Les options sont enregistrées automatiquement à l'ajout. Si vous modifiez ensuite le mod, « Actualiser les options » remplace les options mémorisées. Les combinaisons de plusieurs groupes ne sont pas listées automatiquement : configurez-les dans Penumbra et ajoutez un raccourci pour chacune.\n\nSaisissez une commande du jeu dans Paramètres uniquement si l'emote n'a pas été reconnue.",
+        "ja" => "1. 「エモート」で目的の動きを探し、プレビューで確認します。「パネルに追加」は選んだMODの設定を個別に保存します。/groundsit のポーズは必要に応じて指定できます。\n\n2. アイコンをクリックして再生し、Ctrl+Shift+クリックで削除します。パネルの配置は「パネル」で変更し、非表示のMODは「設定」で戻せます。\n\n3. MODの選択はPenumbraで一時的に行われます。「設定」で解除できます。認識されない組み合わせはPenumbraで設定してから新しいアイコンを追加してください。",
+        "de" => "1. Unter „Emotes“ die gewünschte Bewegung suchen und mit „Vorschau“ testen. „Zur Leiste hinzufügen“ speichert die gewählte Mod-Variante als eigenes Symbol. Für /groundsit kann eine Zielpose gewählt werden.\n\n2. Symbol anklicken zum Abspielen, Strg+Umschalt+Klick zum Entfernen. Die Leiste unter „Leiste“ anpassen; ausgeblendete Mods unter „Einstellungen“ wiederherstellen.\n\n3. Die Mod-Auswahl in Penumbra ist vorübergehend und kann unter „Einstellungen“ zurückgesetzt werden. Nicht erkannte Kombinationen zuerst in Penumbra einstellen und dann als neues Symbol hinzufügen.",
+        "fr" => "1. Dans Emotes, trouvez l'animation voulue et testez-la avec Aperçu. Ajouter au panneau enregistre cette variante du mod séparément. Pour /groundsit, vous pouvez choisir une pose cible.\n\n2. Cliquez sur une icône pour jouer ; Ctrl+Maj+clic la retire. Réglez le panneau dans Panneau et restaurez les mods masqués dans Paramètres.\n\n3. La sélection du mod dans Penumbra est temporaire et peut être effacée dans Paramètres. Pour une combinaison non détectée, configurez-la dans Penumbra puis ajoutez un nouveau raccourci.",
         _ => fallback,
     };
 }

@@ -1,25 +1,13 @@
 # Emote Shelf
 
-Плагин Dalamud для закладок на эмоции из модов Penumbra. `/eshelf` открывает окно плагина, `/eshelf scan` обновляет список, `/eshelf show` и `/eshelf hide` показывают и скрывают панель значков.
+Emote Shelf is a Dalamud plugin for playing emotes from different Penumbra mods without changing mod priorities by hand. It requires Penumbra.
 
-Во вкладке «Эмоции» плагин показывает игровые эмоции и моды Penumbra, которые заменяют их анимации. Нажмите «На панель» возле нужной пары. На игровом экране появится отдельная маленькая сетка иконок; клик по иконке временно выбирает мод и запускает именно эту эмоцию. Вкладка «Панель» настраивает видимость, положение, блокировку перетаскивания, число значков в строке и их размер. Панель не имеет крестика; скрывается в настройках или `/eshelf hide`.
+Open it with `/eshelf`. On **Emotes**, expand a mod, preview an emote, and add the variant you like to the on-screen icon panel. Each icon saves its own Penumbra option selection and stays there after restarting the game. Click an icon to play; Ctrl+Shift+click removes it. Hide unwanted mods from the browser and restore them under **Settings → Hidden mods**.
 
-«Предпросмотр» запускает эмоцию без добавления на панель. Ctrl+Shift+клик по значку удаляет закладку, обычный клик запускает эмоцию. Предпросмотр тоже временно переключает мод; сброс — во вкладке «Настройки».
+Use **Panel** to change the icon grid, icon size, opacity, and position lock. Locking removes the panel background while leaving its icons in place. The panel has no close button; hide it in the plugin or with `/eshelf hide`. `/eshelf show` brings it back, and `/eshelf scan` refreshes the mod list.
 
-На вкладке «Панель» регулируется прозрачность фона. При закреплении заголовок и фон исчезают — остаются только иконки. В «Настройках» доступен выпадающий выбор языка: русский, английский, японский, немецкий и французский.
+When you play an icon, Emote Shelf temporarily gives its mod priority above the collection's other enabled mods, asks Penumbra to redraw your character, and starts the game emote. It checks that Penumbra reports the temporary selection before sending the command. The temporary selection remains until you play another icon, clear it in Settings, or unload the plugin. It does not change permanent Penumbra priorities.
 
-Команды распознаются по игровым данным и списку изменённых эмоций Penumbra. Неопознанные моды находятся во вкладке «Настройки»: только там может понадобиться вручную указать команду вроде `/flamedance`.
+For `/groundsit` replacements, choose the target pose in the emote card when automatic detection is wrong. Switching through poses takes a few seconds. Some emotes may still need in-game testing, especially idle and sitting animations that the game caches. If an emote is not unlocked on your character, a mod cannot play it merely by replacing its files.
 
-Ненужные моды можно скрыть кнопкой в карточке: все их эмоции исчезнут из каталога. Восстановление — «Настройки» → «Скрытые моды». Уже добавленные значки на панели сохраняются.
-
-Каталог сгруппирован как «мод → эмоция → варианты» и по умолчанию свёрнут. Для неоткрытых у персонажа игровых эмоций показана пометка «Не разблокирована»; предпросмотр и добавление на панель отключены. Простая подмена команды не переназначает анимационные файлы мода на другую эмоцию, поэтому такого переключателя пока нет.
-
-Для модов `/groundsit`, в описании которых указана замена второй позы (`sit 2`), плагин после запуска сидения автоматически переключает позу через `/cpose`. Это не мгновенно: около 1–2 секунд. Если клиент не вошёл в сидение или поза не достигнута, появится сообщение; можно попробовать `/cpose` вручную. Эту последовательность ещё нужно проверить в игре.
-
-На вкладке «Панель» размер иконок можно уменьшить до 16 пикселей, а прозрачность действует и на иконки в закреплённом режиме. Дополнительное обновление сохранённых опций перенесено в свёрнутый раздел; опции и так сохраняются при добавлении.
-
-Если у мода есть одиночная группа опций с разными файлами эмоций, она появится под «Варианты мода»: каждый вариант можно сразу добавить отдельной кнопкой. Остальные опции мода автоматически сохраняются из текущих настроек при добавлении. Сочетания нескольких групп пока не распознаются автоматически: настройте их в Penumbra и добавьте отдельные закладки. «Обновить опции» нужно только если вы позже изменили настройки мода и хотите заменить снимок. Закладки остаются после перезапуска.
-
-При нажатии плагин находит коллекцию персонажа, временно включает выбранный мод с приоритетом выше всех активных модов коллекции и запускает игровую команду эмоции. Остальные моды не выключаются. Если выбрана другая замена той же игровой эмоции, плагин запрашивает перерисовку персонажа, чтобы игра выгрузила прежнюю анимацию перед запуском новой. Временная настройка остаётся до следующего выбора, ручного сброса или выгрузки плагина, чтобы длинные танцы не прерывались.
-
-Требуется Penumbra. Эта версия не проверена в запущенной игре; сначала протестируйте на одной закладке. Сборка проекта использует установленный Dalamud SDK и `Penumbra.Api.dll`; `latest.zip` создаётся SDK в `bin/Release/EmoteShelf/`.
+The interface supports Russian, English, Japanese, German, and French. The source is built with the Dalamud SDK and `Penumbra.Api.dll`.
