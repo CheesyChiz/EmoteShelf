@@ -1,0 +1,26 @@
+[Unit]
+Description=Emote Shelf experimental pair relay
+After=network.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+WorkingDirectory=/opt/emoteshelf-relay
+ExecStart=/usr/bin/python3 -B /opt/emoteshelf-relay/server.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+CapabilityBoundingSet=
+MemoryMax=128M
+TasksMax=64
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

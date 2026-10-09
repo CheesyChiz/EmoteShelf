@@ -25,3 +25,9 @@ Selected settings and mod ownership are checked, but exact physical filenames ar
 Unrecognized animation mods are tucked away under **Settings → Unrecognized mods**. Many replace combat files rather than a directly playable emote, so you can usually ignore them. `/cpose3` is not a game command. A manual bookmark is allowed only for a real game emote command.
 
 The interface supports Russian, English, Japanese, German, and French. The source is built with the Dalamud SDK and `Penumbra.Api.dll`.
+
+## Pair relay prototype — not a released plugin feature
+
+`relay/` contains a standard-library Python readiness prototype and a restricted systemd/Caddy deployment. Run `python3 -B -m unittest -v` from that directory. The supplied Caddyfile exposes only `/health`; other paths return 503 deliberately. The game client, mutual-consent workflow, alignment and synchronized playback are not connected yet.
+
+The prototype matches reciprocal self/target hashes and a common animation-family hash, holds no mod files, and expires readiness after 60 seconds. Its identifiers are self-reported, not authenticated game identities; hashing them does not provide anonymity or ownership proof. Do not expose the readiness API as a production service before completing the client threat model and consent/cancellation handling. A future client must never accept commands or movement coordinates from this endpoint: each participant explicitly chooses their own local role, and only that locally prepared action may run.

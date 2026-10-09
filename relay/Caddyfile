@@ -1,0 +1,9 @@
+anarchyclan.ru {
+    # Staging: only expose health until client consent/cancellation is integrated.
+    handle /health {
+        reverse_proxy 127.0.0.1:8765
+    }
+    handle {
+        respond "Emote Shelf synchronization is not available yet." 503
+    }
+}
