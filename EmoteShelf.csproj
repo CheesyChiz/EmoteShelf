@@ -1,6 +1,6 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.2.4.0</Version>
+    <Version>0.2.5.0</Version>
     <Author>CheesyChiz</Author>
     <Name>Emote Shelf</Name>
     <InternalName>EmoteShelf</InternalName>
@@ -8,7 +8,7 @@
     <Description>Browse Penumbra emote mods in local folders, preview variants, and pin favorites to an icon panel. The selected mod is temporarily prioritized before its emote plays. Open with /es or /eshelf. Requires Penumbra.</Description>
     <Tags>emote;dance;penumbra;overlay</Tags>
     <RepoUrl>https://github.com/CheesyChiz/EmoteShelf</RepoUrl>
-    <IconUrl>https://raw.githubusercontent.com/CheesyChiz/EmoteShelf/main/assets/icon.png</IconUrl>
+    <IconUrl>https://raw.githubusercontent.com/CheesyChiz/EmoteShelf/main/assets/icon.png?v=2</IconUrl>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>

@@ -70,6 +70,11 @@ public static partial class ModScanner
                 var inferred = InferCommands(description).Where(catalog.IsKnownCommand);
                 foreach (var command in inferred) byCommand[command] = (command, 0, [.. paths]);
             }
+            // Standing idle replacements often advertise /cpose3, which is not a real command.
+            // A single poseNN timeline is safe to expose as /cpose plus a target slot.
+            var idlePose = InferIdlePose(description, paths);
+            if (byCommand.Count == 0 && idlePose.HasValue)
+                byCommand["/cpose"] = ("Standing pose", 0, [.. paths]);
             if (byCommand.Count == 0) byCommand[""] = ("Unknown emote", 0, [.. paths]);
             foreach (var (command, entry) in byCommand)
             {
@@ -77,7 +82,8 @@ public static partial class ModScanner
                     .DistinctBy(v => (v.Group, v.Option)).ToArray();
                 result.Add(new EmoteMod(directory, displayName, entry.Name, command, entry.Icon,
                     [.. entry.Paths.Order(StringComparer.OrdinalIgnoreCase)], relevant,
-                    command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? InferGroundSitPose(description, entry.Paths) : null));
+                    command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? InferGroundSitPose(description, entry.Paths)
+                        : command.Equals("/cpose", StringComparison.OrdinalIgnoreCase) ? idlePose : null));
             }
         }
         return [.. result.OrderBy(m => m.EmoteName, StringComparer.OrdinalIgnoreCase).ThenBy(m => m.Name, StringComparer.OrdinalIgnoreCase)];
@@ -145,6 +151,16 @@ public static partial class ModScanner
         var poses = paths.Select(p => Regex.Match(Path.GetFileName(p), @"j_pose0?([1-9])", RegexOptions.IgnoreCase))
             .Where(m => m.Success).Select(m => int.Parse(m.Groups[1].Value)).Distinct().ToArray();
         return poses.Length == 1 ? poses[0] - 1 : null;
+    }
+
+    private static int? InferIdlePose(string description, IEnumerable<string> paths)
+    {
+        var poses = paths.Select(p => Regex.Match(Path.GetFileName(p), @"^pose0?([1-9])_(?:start|loop)\.pap$", RegexOptions.IgnoreCase))
+            .Where(m => m.Success).Select(m => int.Parse(m.Groups[1].Value)).Distinct().ToArray();
+        if (poses.Length != 1) return null;
+        var declared = Regex.Match(description, @"/cpose\s*([1-9])", RegexOptions.IgnoreCase);
+        if (declared.Success && int.Parse(declared.Groups[1].Value) != poses[0]) return null;
+        return poses[0] - 1;
     }
 
     public static List<string> InferCommands(string description)

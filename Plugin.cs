@@ -48,6 +48,7 @@ public sealed class Plugin : IDalamudPlugin
     private string pendingCommand = "";
     private long sendAt;
     private int pendingPoseIndex = -1;
+    private EmoteController.PoseType pendingPoseType = EmoteController.PoseType.GroundSit;
     private long poseAt;
     private long poseReadyDeadline;
     private int poseAttempts;
@@ -150,7 +151,8 @@ public sealed class Plugin : IDalamudPlugin
         if (selected is null) { status = T("Мод не найден в Penumbra; обнови список.", "Mod not found in Penumbra; refresh the list."); return; }
         try
         {
-            pendingStand = CurrentPoseIndex() >= 0;
+            pendingStand = CurrentPoseIndex(EmoteController.PoseType.GroundSit) >= 0 &&
+                !bookmark.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase);
             if (pendingStand)
             {
                 StandUpFromGroundSit();
@@ -199,6 +201,8 @@ public sealed class Plugin : IDalamudPlugin
             pendingOptions = selectedOptions.ToDictionary(x => x.Key, x => x.Value.ToArray(), StringComparer.OrdinalIgnoreCase);
             sendAt = Environment.TickCount64 + 750;
             pendingPoseIndex = bookmark.PoseIndex ?? GetPoseIndex(selected);
+            pendingPoseType = bookmark.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase)
+                ? EmoteController.PoseType.GroundSit : EmoteController.PoseType.Idle;
             poseAttempts = 0;
             status = string.Format(T("Выбрано: {0} → {1}", "Selected: {0} → {1}"), selected.Name, pendingCommand);
         }
@@ -257,10 +261,14 @@ public sealed class Plugin : IDalamudPlugin
                         expected.Value.Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase)))
                     throw new InvalidOperationException(T("Penumbra не подтвердила вариант настроек мода; эмоция не запущена.",
                         "Penumbra did not confirm the saved mod options; emote was not played."));
-                ExecuteEmote(command);
+                // Repeating /groundsit while already seated toggles it off instead of refreshing the pose.
+                if ((!command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ||
+                    CurrentPoseIndex(EmoteController.PoseType.GroundSit) < 0) &&
+                    !(command.Equals("/cpose", StringComparison.OrdinalIgnoreCase) && pendingPoseIndex >= 0))
+                    ExecuteEmote(command);
                 if (pendingPoseIndex >= 0)
                 {
-                    poseAt = Environment.TickCount64 + 150;
+                    poseAt = Environment.TickCount64 + 100;
                     poseReadyDeadline = Environment.TickCount64 + 3500;
                 }
             }
@@ -275,13 +283,15 @@ public sealed class Plugin : IDalamudPlugin
         if (pendingPoseIndex < 0 || pendingCommand.Length > 0 || Environment.TickCount64 < poseAt) return;
         try
         {
-            var currentPose = CurrentPoseIndex();
+            var currentPose = CurrentPoseIndex(pendingPoseType);
             if (currentPose < 0)
             {
                 if (Environment.TickCount64 >= poseReadyDeadline)
                 {
                     pendingPoseIndex = -1;
-                    status = T("Не удалось войти в /groundsit до смены позы.", "Could not enter /groundsit before changing pose.");
+                    status = pendingPoseType == EmoteController.PoseType.GroundSit
+                        ? T("Не удалось войти в /groundsit до смены позы.", "Could not enter /groundsit before changing pose.")
+                        : T("Не удалось перейти в стоячую позу до /cpose.", "Could not enter a standing idle pose before /cpose.");
                 }
                 else poseAt = Environment.TickCount64 + 200;
                 return;
@@ -294,17 +304,17 @@ public sealed class Plugin : IDalamudPlugin
                 return;
             }
             ExecuteEmote("/cpose");
-            poseAt = Environment.TickCount64 + 350;
+            poseAt = Environment.TickCount64 + 500;
         }
         catch (Exception ex) { pendingPoseIndex = -1; status = ex.Message; Log.Warning(ex, "Pose switch failed"); }
     }
 
-    private unsafe int CurrentPoseIndex()
+    private unsafe int CurrentPoseIndex(EmoteController.PoseType poseType = EmoteController.PoseType.GroundSit)
     {
         var player = Objects.LocalPlayer;
         if (player is null) return -1;
         var controller = &((Character*)player.Address)->EmoteController;
-        return controller->CurrentPoseType == EmoteController.PoseType.GroundSit ? controller->CPoseState : -1;
+        return controller->CurrentPoseType == poseType ? controller->CPoseState : -1;
     }
 
     private unsafe void StandUpFromGroundSit()
@@ -520,7 +530,8 @@ public sealed class Plugin : IDalamudPlugin
                 ImGui.SameLine();
                 ImGui.SetNextItemWidth(180);
                 var currentFolder = FolderFor(selectedModDirectory);
-                if (ImGui.BeginCombo("##moveFolder", currentFolder.Length == 0 ? T("Без папки", "Unfiled") : currentFolder))
+                if (ImGui.BeginCombo("##moveFolder", string.Format(T("Папка: {0}", "Folder: {0}"),
+                    currentFolder.Length == 0 ? T("Без папки", "Unfiled") : currentFolder)))
                 {
                     if (ImGui.Selectable(T("Без папки", "Unfiled"))) { config.ModFolders.Remove(selectedModDirectory); Save(); }
                     foreach (var folder in config.Folders)
@@ -608,9 +619,9 @@ public sealed class Plugin : IDalamudPlugin
                 {
                     ImGui.PushID(index);
                     ImGui.BeginDisabled(locked);
-                    if (ImGui.SmallButton(T("На панель", "Add to panel"))) AddBookmark(mod, variant);
-                    ImGui.SameLine();
                     if (ImGui.SmallButton(T("Предпросмотр", "Preview"))) Preview(mod, variant);
+                    ImGui.SameLine();
+                    if (ImGui.SmallButton(T("На панель", "Add to panel"))) AddBookmark(mod, variant);
                     ImGui.EndDisabled();
                     ImGui.SameLine();
                     ImGui.TextUnformatted($"{variant.Group} → {variant.Option}");
@@ -739,9 +750,9 @@ public sealed class Plugin : IDalamudPlugin
                                 {
                                     ImGui.PushID(variantIndex);
                                     ImGui.BeginDisabled(lockedEmote);
-                                    if (ImGui.SmallButton(T("На панель", "Add to panel"))) AddBookmark(mod, variant);
-                                    ImGui.SameLine();
                                     if (ImGui.SmallButton(T("Предпросмотр", "Preview"))) Preview(mod, variant);
+                                    ImGui.SameLine();
+                                    if (ImGui.SmallButton(T("На панель", "Add to panel"))) AddBookmark(mod, variant);
                                     ImGui.EndDisabled();
                                     ImGui.SameLine();
                                     ImGui.TextUnformatted($"{variant.Group} → {variant.Option}");
@@ -819,6 +830,7 @@ public sealed class Plugin : IDalamudPlugin
         var key = $"{mod.Directory}|{mod.Command}";
         var selected = config.PoseOverrides.GetValueOrDefault(key, -1);
         var label = selected < 0 ? T("Авто", "Auto") : string.Format(T("Поза {0}", "Pose {0}"), selected + 1);
+        if (!ImGui.TreeNode(T("Выбрать позу вручную (если авто не работает)", "Select pose manually (if auto fails)") + "##poseAdvanced")) return;
         ImGui.SetNextItemWidth(150);
         if (ImGui.BeginCombo(T("Нужная поза", "Target pose") + "##pose", label))
         {
@@ -832,6 +844,7 @@ public sealed class Plugin : IDalamudPlugin
             "After /groundsit, changing pose may take a couple of seconds."));
         ImGui.TextDisabled(T("Авто не меняет позу. Поза 1–4 — слоты /groundsit, не варианты мода.",
             "Auto does not switch pose. Poses 1–4 are /groundsit slots, not mod variants."));
+        ImGui.TreePop();
     }
 
     private void DrawPanelTab()
