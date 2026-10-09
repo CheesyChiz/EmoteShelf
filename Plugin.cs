@@ -57,6 +57,7 @@ public sealed class Plugin : IDalamudPlugin
     private int pendingPriority;
     private readonly HashSet<string> expandedVariants = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> expandedMods = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> collapsedMods = new(StringComparer.OrdinalIgnoreCase);
 
     public Plugin()
     {
@@ -376,11 +377,11 @@ public sealed class Plugin : IDalamudPlugin
                     m.Command.Contains(search, StringComparison.OrdinalIgnoreCase)).ToArray();
                 if (matches.Length == 0) continue;
                 ImGui.PushID(group.Key);
-                var modExpanded = expandedMods.Contains(group.Key) || search.Length > 0;
+                var modExpanded = !collapsedMods.Contains(group.Key) && (expandedMods.Contains(group.Key) || search.Length > 0);
                 if (ImGui.SmallButton($"{(modExpanded ? "▼" : "▶")} {group.First().Name} ({matches.Length})##mod"))
                 {
-                    if (expandedMods.Contains(group.Key)) expandedMods.Remove(group.Key);
-                    else expandedMods.Add(group.Key);
+                    if (modExpanded) { expandedMods.Remove(group.Key); collapsedMods.Add(group.Key); }
+                    else { collapsedMods.Remove(group.Key); expandedMods.Add(group.Key); }
                 }
                 ImGui.SameLine();
                 if (ImGui.SmallButton(T("Скрыть мод", "Hide mod"))) { config.HiddenMods.Add(group.Key); Save(); }
