@@ -40,6 +40,8 @@ public sealed class Plugin : IDalamudPlugin
     private readonly SetTemporaryModSettings setTemporary = new(Pi);
     private readonly RemoveAllTemporaryModSettings removeTemporary = new(Pi);
     private readonly RedrawObject redraw = new(Pi);
+    private readonly IDisposable redrawCompletedSubscription;
+    private readonly ResolvePath resolvePath = new(Pi);
     private List<EmoteMod> discovered = [];
     private EmoteCatalog? catalog;
     private bool settingsOpen;
@@ -48,16 +50,23 @@ public sealed class Plugin : IDalamudPlugin
     private Guid activeCollection;
     private string pendingCommand = "";
     private long sendAt;
+    private long redrawDeadline;
+    private bool redrawCompleted;
     private int pendingPoseIndex = -1;
     private EmoteController.PoseType pendingPoseType = EmoteController.PoseType.GroundSit;
     private long poseAt;
     private long poseReadyDeadline;
     private int poseAttempts;
+    private bool poseStepAwaiting;
+    private int poseBeforeStep;
+    private long poseStepDeadline;
     private bool initialScanPending = true;
     private string pendingModDirectory = "";
     private Guid pendingCollection;
     private int pendingPriority;
     private Dictionary<string, string[]>? pendingOptions;
+    private string[] pendingExpectedPaths = [];
+    private string pendingExpectedModRoot = "";
     private Bookmark? waitingForStand;
     private long standDeadline;
     private readonly HashSet<string> expandedVariants = new(StringComparer.OrdinalIgnoreCase);
@@ -74,6 +83,7 @@ public sealed class Plugin : IDalamudPlugin
 
     public Plugin()
     {
+        redrawCompletedSubscription = GameObjectRedrawn.Subscriber(Pi, OnGameObjectRedrawn);
         config = Pi.GetPluginConfig() as Configuration ?? new Configuration();
         config.Bookmarks ??= [];
         config.CommandOverrides ??= new(StringComparer.OrdinalIgnoreCase);
@@ -92,6 +102,11 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     private void Save() => Pi.SavePluginConfig(config);
+    private void OnGameObjectRedrawn(nint address, int index)
+    {
+        if (Objects.LocalPlayer is { } player && (index == player.ObjectIndex || address == player.Address))
+            redrawCompleted = true;
+    }
     private void OpenSettings() => settingsOpen = true;
     private void OnCommand(string _, string args)
     {
@@ -123,6 +138,20 @@ public sealed class Plugin : IDalamudPlugin
                 if (bookmark.IconId == 0 && match.Icon != 0) { bookmark.IconId = match.Icon; changedBookmarks = true; }
                 if (match.PoseIndex.HasValue && bookmark.PoseIndex != match.PoseIndex)
                 { bookmark.PoseIndex = match.PoseIndex; changedBookmarks = true; }
+                else if (match.PoseSlots.Length > 1 &&
+                    (!bookmark.PoseIndex.HasValue || !match.PoseSlots.Contains(bookmark.PoseIndex.Value)))
+                { bookmark.PoseIndex = match.PoseSlots[0]; changedBookmarks = true; }
+                if (match.PoseSlots.Length > 0 && bookmark.SavedOptions is not null)
+                {
+                    var prefix = match.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? "j_" : "";
+                    var selectedVariant = match.Variants.FirstOrDefault(v =>
+                        bookmark.SavedOptions.TryGetValue(v.Group, out var options) &&
+                        options.Contains(v.Option, StringComparer.OrdinalIgnoreCase) &&
+                        bookmark.Name.EndsWith($"— {v.Option}", StringComparison.Ordinal));
+                    var variantPose = selectedVariant is null ? null : PoseSlot.FromPaths(selectedVariant.Paths, prefix);
+                    if (variantPose.HasValue && bookmark.PoseIndex != variantPose)
+                    { bookmark.PoseIndex = variantPose; changedBookmarks = true; }
+                }
                 var oldVariant = match.Variants.FirstOrDefault(v =>
                     bookmark.Name.Equals($"{match.EmoteName} — {v.Option}", StringComparison.Ordinal));
                 if (oldVariant is not null)
@@ -149,6 +178,7 @@ public sealed class Plugin : IDalamudPlugin
         pendingCommand = "";
         pendingModDirectory = "";
         pendingPoseIndex = -1;
+        poseStepAwaiting = false;
         if (!ModScanner.ValidCommand(bookmark.Command)) { status = T("У закладки нет корректной команды эмоции.", "The bookmark has no valid emote command."); return; }
         if (Objects.LocalPlayer is not { } player) { status = T("Персонаж не в игре.", "Character is not in game."); return; }
         var selected = discovered.FirstOrDefault(m => m.Directory == bookmark.ModDirectory &&
@@ -200,18 +230,33 @@ public sealed class Plugin : IDalamudPlugin
                 priority, selectedOptions, "Emote Shelf", TemporaryKey);
             if (ecSet != PenumbraApiEc.Success && ecSet != PenumbraApiEc.NothingChanged)
                 throw new InvalidOperationException(string.Format(T("Не удалось переключить {0}: {1}", "Could not switch {0}: {1}"), selected.Name, ecSet));
-            try { redraw.Invoke(0, RedrawType.Redraw); }
-            catch (Exception ex) { Log.Warning(ex, "Redraw failed; animation may remain cached"); }
+            redrawCompleted = false;
+            redrawDeadline = Environment.TickCount64 + 1600;
+            try { redraw.Invoke(player.ObjectIndex, RedrawType.Redraw); }
+            catch (Exception ex) { redrawCompleted = true; Log.Warning(ex, "Redraw failed; animation may remain cached"); }
             pendingCommand = bookmark.Command.Trim();
             pendingModDirectory = selected.Directory;
             pendingCollection = collection.Id;
             pendingPriority = priority;
             pendingOptions = selectedOptions.ToDictionary(x => x.Key, x => x.Value.ToArray(), StringComparer.OrdinalIgnoreCase);
-            sendAt = Environment.TickCount64 + 500;
+            var variantPaths = selected.Variants.SelectMany(v => v.Paths)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var basePaths = selected.Paths.Where(path => !variantPaths.Contains(path));
+            var activeVariantPaths = selected.Variants.Where(v => selectedOptions.TryGetValue(v.Group, out var enabled) &&
+                    enabled.Contains(v.Option, StringComparer.OrdinalIgnoreCase))
+                .SelectMany(v => v.Paths);
+            pendingExpectedPaths = basePaths.Concat(activeVariantPaths)
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            if (pendingExpectedPaths.Length == 0)
+                throw new InvalidOperationException(T("Для выбранного варианта нет активных файлов анимации.",
+                    "The selected variant has no active animation files."));
+            pendingExpectedModRoot = Path.GetFullPath(Path.Combine(getRoot.Invoke(), selected.Directory));
+            sendAt = Environment.TickCount64 + 150;
             pendingPoseIndex = bookmark.PoseIndex ?? GetPoseIndex(selected);
             pendingPoseType = bookmark.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase)
                 ? EmoteController.PoseType.GroundSit : EmoteController.PoseType.Idle;
             poseAttempts = 0;
+            poseStepAwaiting = false;
             status = string.Format(T("Выбрано: {0} → {1}", "Selected: {0} → {1}"), selected.Name, pendingCommand);
         }
         catch (Exception ex)
@@ -219,6 +264,8 @@ public sealed class Plugin : IDalamudPlugin
             pendingCommand = "";
             pendingModDirectory = "";
             pendingOptions = null;
+            pendingExpectedPaths = [];
+            pendingExpectedModRoot = "";
             try { if (activeCollection != Guid.Empty) removeTemporary.Invoke(activeCollection, TemporaryKey); } catch { /* Penumbra unavailable */ }
             status = ex.Message;
             Log.Warning(ex, "Emote Shelf switching failed");
@@ -248,6 +295,8 @@ public sealed class Plugin : IDalamudPlugin
         }
         if (pendingCommand.Length > 0 && Environment.TickCount64 >= sendAt)
         {
+            if (!redrawCompleted && Environment.TickCount64 < redrawDeadline) return;
+            if (!redrawCompleted) Log.Warning("Penumbra redraw confirmation timed out; continuing with verified mod paths");
             var command = pendingCommand;
             pendingCommand = "";
             try
@@ -262,6 +311,16 @@ public sealed class Plugin : IDalamudPlugin
                         expected.Value.Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase)))
                     throw new InvalidOperationException(T("Penumbra не подтвердила вариант настроек мода; эмоция не запущена.",
                         "Penumbra did not confirm the saved mod options; emote was not played."));
+                foreach (var gamePath in pendingExpectedPaths)
+                {
+                    var ecPath = resolvePath.Invoke(pendingCollection, gamePath, out var effectivePath);
+                    if (ecPath != PenumbraApiEc.Success || string.IsNullOrWhiteSpace(effectivePath) ||
+                        !Path.GetFullPath(effectivePath).StartsWith(pendingExpectedModRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                            StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException(string.Format(T(
+                            "Penumbra отдаёт для {0} файл не из выбранного мода: {1}",
+                            "Penumbra resolves {0} outside the selected mod: {1}"), gamePath, effectivePath));
+                }
                 if (!(command.Equals("/cpose", StringComparison.OrdinalIgnoreCase) && pendingPoseIndex >= 0))
                     ExecuteEmote(command);
                 if (pendingPoseIndex >= 0)
@@ -276,7 +335,7 @@ public sealed class Plugin : IDalamudPlugin
                 status = string.Format(T("Мод переключен, но эмоция не запустилась: {0}", "Mod switched, but the emote did not start: {0}"), ex.Message);
                 Log.Warning(ex, "Emote failed");
             }
-            finally { pendingModDirectory = ""; pendingOptions = null; }
+            finally { pendingModDirectory = ""; pendingOptions = null; pendingExpectedPaths = []; pendingExpectedModRoot = ""; }
         }
         if (pendingPoseIndex < 0 || pendingCommand.Length > 0 || Environment.TickCount64 < poseAt) return;
         try
@@ -295,6 +354,29 @@ public sealed class Plugin : IDalamudPlugin
                 else poseAt = Environment.TickCount64 + 200;
                 return;
             }
+            if (poseStepAwaiting)
+            {
+                if (currentPose == poseBeforeStep)
+                {
+                    if (Environment.TickCount64 >= poseStepDeadline)
+                    {
+                        pendingPoseIndex = -1;
+                        poseStepAwaiting = false;
+                        status = T("Игра не подтвердила шаг /cpose; остановлено, чтобы не проскочить нужную позу.",
+                            "The game did not confirm the /cpose step; stopped to avoid overshooting the target pose.");
+                    }
+                    return;
+                }
+                poseStepAwaiting = false;
+            }
+            var highestPose = EmoteController.GetAvailablePoses(pendingPoseType);
+            if (pendingPoseIndex > highestPose)
+            {
+                status = string.Format(T("Поза {0} недоступна персонажу (максимум: {1}).",
+                    "Pose {0} is unavailable for this character (maximum: {1})."), pendingPoseIndex, highestPose);
+                pendingPoseIndex = -1;
+                return;
+            }
             if (currentPose == pendingPoseIndex)
             {
                 status = string.Format(T("Поза {0} выбрана.", "Pose {0} selected."), currentPose + 1);
@@ -308,6 +390,9 @@ public sealed class Plugin : IDalamudPlugin
                 return;
             }
             ExecuteEmote("/cpose");
+            poseBeforeStep = currentPose;
+            poseStepAwaiting = true;
+            poseStepDeadline = Environment.TickCount64 + 2500;
             status = string.Format(T("Переключаю позу {0} → {1} (шаг {2}).", "Changing pose {0} → {1} (step {2})."),
                 currentPose + 1, pendingPoseIndex + 1, poseAttempts);
             poseAt = Environment.TickCount64 + 500;
@@ -347,8 +432,17 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     private int GetPoseIndex(EmoteMod mod)
-        => mod.PoseIndex ?? (config.PoseOverrides.TryGetValue($"{mod.Directory}|{mod.Command}", out var poseOverride) && poseOverride >= 0
-            ? poseOverride : -1);
+    {
+        if (mod.PoseIndex.HasValue) return mod.PoseIndex.Value;
+        if (config.PoseOverrides.TryGetValue($"{mod.Directory}|{mod.Command}", out var poseOverride) &&
+            poseOverride >= 0 && (mod.PoseSlots.Length == 0 || mod.PoseSlots.Contains(poseOverride)))
+            return poseOverride;
+        return mod.PoseSlots.Length > 0 ? mod.PoseSlots[0] : -1;
+    }
+
+    private static bool IsPoseCommand(string command)
+        => command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ||
+           command.Equals("/cpose", StringComparison.OrdinalIgnoreCase);
 
     private unsafe void ExecuteEmote(string command)
     {
@@ -598,7 +692,7 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.PushID(mod.Command);
         var variantKey = $"{mod.Directory}|{mod.Command}";
         var expanded = expandedVariants.Contains(variantKey);
-        var poseHintHeight = mod.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase)
+        var poseHintHeight = IsPoseCommand(mod.Command)
             ? mod.PoseIndex.HasValue ? 22 : 65 : 0;
         var height = (mod.Variants.Length == 0 ? 88 : expanded ? 90 + mod.Variants.Length * 23 : 80) + poseHintHeight;
         ImGui.BeginChild("##card", new Vector2(0, height), true);
@@ -621,7 +715,7 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.EndDisabled();
         }
         ImGui.EndGroup();
-        if (mod.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase)) DrawPoseSelector(mod);
+        if (IsPoseCommand(mod.Command)) DrawPoseSelector(mod);
         if (mod.Variants.Length > 0)
         {
             if (ImGui.SmallButton($"{(expanded ? "▼" : "▶")} {T("Варианты мода", "Mod variants")} ({mod.Variants.Length})##variants"))
@@ -721,7 +815,7 @@ public sealed class Plugin : IDalamudPlugin
                         ImGui.PushID(mod.Command);
                         var variantKey = $"{mod.Directory}|{mod.Command}";
                         var expanded = expandedVariants.Contains(variantKey);
-                        var poseHintHeight = mod.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase)
+                        var poseHintHeight = IsPoseCommand(mod.Command)
                             ? mod.PoseIndex.HasValue ? 22 : 65 : 0;
                         ImGui.BeginChild("##card", new Vector2(0, (mod.Variants.Length == 0 ? 88 : expanded ? 90 + mod.Variants.Length * 23 : 80) + poseHintHeight), true);
                         var icon = Textures.GetFromGameIcon(new GameIconLookup(mod.Icon == 0 ? 19u : mod.Icon)).GetWrapOrDefault();
@@ -749,7 +843,7 @@ public sealed class Plugin : IDalamudPlugin
                             ImGui.EndDisabled();
                         }
                         ImGui.EndGroup();
-                        if (mod.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase)) DrawPoseSelector(mod);
+                        if (IsPoseCommand(mod.Command)) DrawPoseSelector(mod);
                         if (mod.Variants.Length > 0)
                         {
                             if (ImGui.SmallButton($"{(expanded ? "▼" : "▶")} {T("Варианты мода", "Mod variants")} ({mod.Variants.Length})##variants"))
@@ -824,7 +918,10 @@ public sealed class Plugin : IDalamudPlugin
                 saved[other.Group] = [other.OffOption!];
             saved[variant.Group] = [variant.Option];
         }
-        var targetPose = variant is not null && mod.PoseIndex.HasValue ? mod.PoseIndex.Value : GetPoseIndex(mod);
+        var posePrefix = mod.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? "j_" : "";
+        var variantPose = variant is not null && mod.PoseSlots.Length > 0
+            ? PoseSlot.FromPaths(variant.Paths, posePrefix) : null;
+        var targetPose = variantPose ?? GetPoseIndex(mod);
         return new Bookmark { ModDirectory = mod.Directory,
             Name = variant is null ? $"{mod.EmoteName} — {mod.Name}" : $"{mod.Name} — {mod.EmoteName} — {variant.Option}",
             Command = mod.Command, IconId = mod.Icon, SavedOptions = saved,
@@ -835,8 +932,26 @@ public sealed class Plugin : IDalamudPlugin
     {
         if (mod.PoseIndex.HasValue)
         {
-            ImGui.TextDisabled(string.Format(T("Мод заменяет позу {0} из /groundsit.",
-                "This mod replaces /groundsit pose {0}."), mod.PoseIndex.Value + 1));
+            var file = mod.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? "j_pose" : "pose";
+            ImGui.TextDisabled(string.Format(T("Мод заменяет слот {0}{1:00}.",
+                "This mod replaces slot {0}{1:00}."), file, mod.PoseIndex.Value));
+            return;
+        }
+        if (mod.PoseSlots.Length > 1)
+        {
+            var slotKey = $"{mod.Directory}|{mod.Command}";
+            var selectedSlot = GetPoseIndex(mod);
+            var file = mod.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? "j_pose" : "pose";
+            ImGui.SetNextItemWidth(150);
+            if (ImGui.BeginCombo(T("Слот мода", "Mod slot") + "##pose", $"{file}{selectedSlot:00}"))
+            {
+                foreach (var slot in mod.PoseSlots)
+                    if (ImGui.Selectable($"{file}{slot:00}", selectedSlot == slot))
+                    { config.PoseOverrides[slotKey] = slot; Save(); }
+                ImGui.EndCombo();
+            }
+            ImGui.TextDisabled(T("В этом моде несколько слотов поз; выбери нужный файл.",
+                "This mod replaces several pose slots; choose the intended file."));
             return;
         }
         var key = $"{mod.Directory}|{mod.Command}";
@@ -920,8 +1035,8 @@ public sealed class Plugin : IDalamudPlugin
     private void DrawHelpTab()
     {
         ImGui.TextWrapped(T(
-            "1. Во вкладке «Эмоции» выбери мод слева. Справа проверь нужный вариант через «Предпросмотр» и добавь его на панель. Кнопки под списком создают, переименовывают и удаляют локальные папки; мод можно перетащить в папку.\n\n2. Клик по значку запускает эмоцию, Ctrl+Shift+клик удаляет значок. Значки можно переставлять перетаскиванием. Панель настраивается во вкладке «Панель».\n\n3. Плагин временно выбирает мод в Penumbra; сброс — во вкладке «Настройки». Для /groundsit номер позы определяется из файлов мода, когда это возможно. Неопознанные моды не обязательно являются эмоциями и находятся в отдельном свёрнутом разделе настроек.",
-            "1. On Emotes, select a mod on the left. On the right, test a variant with Preview and add it to the panel. Buttons below the list create, rename, and delete local folders; drag mods onto folders.\n\n2. Click an icon to play; Ctrl+Shift+click to remove it. Drag icons to reorder them. Customize the overlay on Panel.\n\n3. The plugin temporarily selects a Penumbra mod; clear this on Settings. For /groundsit, the pose slot is detected from mod files when possible. Unrecognized animation mods are not necessarily playable emotes and are tucked away in Settings."));
+            "1. Во вкладке «Эмоции» выбери мод слева. Справа проверь нужный вариант через «Предпросмотр» и добавь его на панель. Кнопки под списком создают, переименовывают и удаляют локальные папки; мод можно перетащить в папку.\n\n2. Клик по значку запускает эмоцию, Ctrl+Shift+клик удаляет значок. Значки можно переставлять перетаскиванием. Панель настраивается во вкладке «Панель».\n\n3. Плагин временно выбирает мод в Penumbra; сброс — во вкладке «Настройки». Для /groundsit и стоячих idle номер позы определяется из файлов мода. При нескольких слотах выбери нужный файл. Неопознанные моды находятся в отдельном разделе настроек.",
+            "1. On Emotes, select a mod on the left. On the right, test a variant with Preview and add it to the panel. Buttons below the list create, rename, and delete local folders; drag mods onto folders.\n\n2. Click an icon to play; Ctrl+Shift+click to remove it. Drag icons to reorder them. Customize the overlay on Panel.\n\n3. The plugin temporarily selects a Penumbra mod; clear this on Settings. It detects /groundsit and standing-idle slots from mod files. Select a file when several slots are present. Unrecognized animation mods are tucked away in Settings."));
         ImGui.Separator();
         ImGui.TextWrapped(T("Неинтересные моды можно скрыть прямо в каталоге. Вернуть их можно во вкладке «Настройки» → «Скрытые моды». Уже добавленные значки при этом остаются на панели.",
             "Hide unwanted mods directly in the browser. Restore them under Settings → Hidden mods. Existing panel bookmarks remain intact."));
@@ -1002,6 +1117,7 @@ public sealed class Plugin : IDalamudPlugin
     public void Dispose()
     {
         pendingCommand = "";
+        redrawCompletedSubscription.Dispose();
         try { if (activeCollection != Guid.Empty) removeTemporary.Invoke(activeCollection, TemporaryKey); } catch { /* Penumbra unloaded */ }
         Framework.Update -= Update;
         Pi.UiBuilder.Draw -= Draw;

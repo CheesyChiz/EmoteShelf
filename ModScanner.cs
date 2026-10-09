@@ -5,7 +5,10 @@ namespace EmoteShelf;
 
 public sealed record EmoteVariant(string Group, string Option, string[] Paths, string? OffOption);
 public sealed record EmoteMod(string Directory, string Name, string EmoteName, string Command, uint Icon, string[] Paths,
-    EmoteVariant[] Variants, int? PoseIndex);
+    EmoteVariant[] Variants, int? PoseIndex)
+{
+    public int[] PoseSlots { get; init; } = [];
+}
 
 public static partial class ModScanner
 {
@@ -71,19 +74,24 @@ public static partial class ModScanner
                 foreach (var command in inferred) byCommand[command] = (command, 0, [.. paths]);
             }
             // Standing idle replacements often advertise /cpose3, which is not a real command.
-            // A single poseNN timeline is safe to expose as /cpose plus a target slot.
+            // poseNN timelines are exposed as /cpose with a detected or selectable target slot.
+            var idleSlots = PoseSlot.AllFromPaths(paths, "");
             var idlePose = InferIdlePose(description, paths);
-            if (byCommand.Count == 0 && idlePose.HasValue)
+            if (byCommand.Count == 0 && idleSlots.Length > 0)
                 byCommand["/cpose"] = ("Standing pose", 0, [.. paths]);
             if (byCommand.Count == 0) byCommand[""] = ("Unknown emote", 0, [.. paths]);
             foreach (var (command, entry) in byCommand)
             {
                 var relevant = variants.Where(v => v.Paths.Any(p => entry.Paths.Contains(p, StringComparer.OrdinalIgnoreCase)))
                     .DistinctBy(v => (v.Group, v.Option)).ToArray();
+                var poseSlots = command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase)
+                    ? PoseSlot.AllFromPaths(entry.Paths, "j_")
+                    : command.Equals("/cpose", StringComparison.OrdinalIgnoreCase) ? idleSlots : [];
                 result.Add(new EmoteMod(directory, displayName, entry.Name, command, entry.Icon,
                     [.. entry.Paths.Order(StringComparer.OrdinalIgnoreCase)], relevant,
                     command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? InferGroundSitPose(description, entry.Paths)
-                        : command.Equals("/cpose", StringComparison.OrdinalIgnoreCase) ? idlePose : null));
+                        : command.Equals("/cpose", StringComparison.OrdinalIgnoreCase) ? idlePose : null)
+                    { PoseSlots = poseSlots });
             }
         }
         return [.. result.OrderBy(m => m.EmoteName, StringComparer.OrdinalIgnoreCase).ThenBy(m => m.Name, StringComparer.OrdinalIgnoreCase)];
@@ -146,21 +154,24 @@ public static partial class ModScanner
 
     private static int? InferGroundSitPose(string description, IEnumerable<string> paths)
     {
-        var fromDescription = Regex.Match(description, @"(?:/cpose\s*|\bsit\s*)([1-9])", RegexOptions.IgnoreCase);
-        if (fromDescription.Success) return int.Parse(fromDescription.Groups[1].Value) - 1;
-        var poses = paths.Select(p => Regex.Match(Path.GetFileName(p), @"j_pose0?([1-9])", RegexOptions.IgnoreCase))
-            .Where(m => m.Success).Select(m => int.Parse(m.Groups[1].Value)).Distinct().ToArray();
-        return poses.Length == 1 ? poses[0] - 1 : null;
+        // pose00 is the default stance; j_pose01 is the first /cpose step (index 1).
+        var pose = PoseSlot.FromPaths(paths, "j_");
+        if (pose.HasValue) return pose;
+        var fromDescription = Regex.Match(description, @"/cpose\s*([1-9])", RegexOptions.IgnoreCase);
+        return fromDescription.Success ? int.Parse(fromDescription.Groups[1].Value) : null;
     }
 
     private static int? InferIdlePose(string description, IEnumerable<string> paths)
     {
-        var poses = paths.Select(p => Regex.Match(Path.GetFileName(p), @"^pose0?([1-9])_(?:start|loop)\.pap$", RegexOptions.IgnoreCase))
-            .Where(m => m.Success).Select(m => int.Parse(m.Groups[1].Value)).Distinct().ToArray();
-        if (poses.Length != 1) return null;
+        var slots = PoseSlot.AllFromPaths(paths, "");
+        if (slots.Length == 0) return null;
         var declared = Regex.Match(description, @"/cpose\s*([1-9])", RegexOptions.IgnoreCase);
-        if (declared.Success && int.Parse(declared.Groups[1].Value) != poses[0]) return null;
-        return poses[0] - 1;
+        if (declared.Success)
+        {
+            var requested = int.Parse(declared.Groups[1].Value);
+            return slots.Contains(requested) ? requested : null;
+        }
+        return slots.Length == 1 ? slots[0] : null;
     }
 
     public static List<string> InferCommands(string description)
