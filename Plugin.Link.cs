@@ -15,6 +15,24 @@ public sealed partial class Plugin
     private string linkNotice = "", lastLinkState = "", lastLinkPartner = "", handledInvitation = "";
     private long linkNoticeUntil;
     private long pairNoticeUntil;
+    private string lastLinkDiagnostic = "", lastInviteDiagnostic = "", lastInviteReason = "";
+
+    private string InviteBlockReason(IPlayerCharacter actor)
+    {
+        if (!LightlessLoaded()) return T("Lightless не загружен", "Lightless not loaded");
+        if (link is null) return T("нет соединения с сервером", "relay not connected");
+        if (link.Snapshot.State == "error") return T("ошибка связи — переподключись в Settings", "connection error — reconnect in Settings");
+        if (link.Snapshot.State == "connecting") return T("подключение к серверу…", "connecting to relay…");
+        if (!LinkFresh) return T("сервер давно не отвечал", "relay response is stale");
+        if (link.Snapshot.State == "incoming") return T("сначала ответь на входящее приглашение", "answer the incoming invitation first");
+        if (link.Snapshot.State == "outgoing") return T("приглашение уже отправлено", "invitation already pending");
+        if (link.Snapshot.State == "linked") return T("уже есть подключённый партнёр", "already linked to a partner");
+        if (link.Snapshot.State != "idle") return T("сессия не готова", "session not ready");
+        if (!LightlessHandles(actor.Address)) return lightlessIpcError.Length > 0
+            ? T("ошибка API Lightless: ", "Lightless API error: ") + lightlessIpcError
+            : T("Lightless не обрабатывает этого персонажа", "Lightless does not handle this character");
+        return "";
+    }
     private static string LinkIdentity(IPlayerCharacter player) => PairRules.Identity(player.Name.TextValue, player.HomeWorld.RowId, 0, 0);
     private IPlayerCharacter? LinkActor(string identity) => Objects.OfType<IPlayerCharacter>().FirstOrDefault(p => LinkIdentity(p) == identity);
     private bool LinkFresh => link is not null && Environment.TickCount64 - link.Snapshot.ReceivedAt < 4000;
@@ -33,6 +51,12 @@ public sealed partial class Plugin
         if (link is not null && link.Identity != LinkIdentity(local)) StopLink();
         link ??= new LinkClient(LinkIdentity(local));
         var s = link.Snapshot;
+        var diagnostic = $"state={s.State} fresh={LinkFresh} error={s.Error}";
+        if (diagnostic != lastLinkDiagnostic)
+        {
+            Log.Information("Pair connection: " + diagnostic);
+            lastLinkDiagnostic = diagnostic;
+        }
         if (s.Error.Length > 0 && linkNotice != s.Error) { linkNotice = s.Error; linkNoticeUntil = Environment.TickCount64 + 5000; }
         if (s.State != lastLinkState || s.Partner != lastLinkPartner)
         {
@@ -50,22 +74,34 @@ public sealed partial class Plugin
             Objects.LocalPlayer is not { } local || actor.GameObjectId == local.GameObjectId) return;
         var identity = LinkIdentity(actor);
         var disconnect = LinkFresh && link!.Snapshot.State == "linked" && link.Snapshot.Partner == identity;
+        var reason = disconnect ? "" : InviteBlockReason(actor);
+        lastInviteReason = reason;
+        var diagnostic = disconnect ? "disconnect available" : reason.Length == 0 ? "invite available" : reason;
+        if (diagnostic != lastInviteDiagnostic)
+        {
+            Log.Information("Pair invitation menu: " + diagnostic);
+            lastInviteDiagnostic = diagnostic;
+        }
         args.AddMenuItem(new MenuItem
         {
             Name = T(disconnect ? "Emote Shelf: отключить партнёра" : "Emote Shelf: предложить парную сессию",
-                disconnect ? "Emote Shelf: disconnect partner" : "Emote Shelf: invite partner"),
+                disconnect ? "Emote Shelf: disconnect partner" : "Emote Shelf: invite partner") + (reason.Length > 0 ? " — " + reason : ""),
             PrefixChar = 'E', Priority = 100,
-            IsEnabled = disconnect || (LinkFresh && link!.Snapshot.State == "idle" && LightlessHandles(actor.Address)),
+            IsEnabled = disconnect || reason.Length == 0,
             OnClicked = _ =>
             {
                 if (disconnect) { CancelPair(); link?.Act("disconnect"); }
                 else if (LinkFresh && link!.Snapshot.State == "idle" && LinkActor(identity) is { } current && LightlessHandles(current.Address))
-                    link.Act("invite", identity);
+                { Log.Information("Pair invitation: sending request"); link.Act("invite", identity); }
             },
         });
     }
     private void DrawLinkSettings()
     {
+        ImGui.TextWrapped(T("Сервер: ", "Relay: ") + (link?.Snapshot.State ?? "disconnected") +
+            (link is not null && !LinkFresh ? T(" — ответ устарел", " — stale response") : ""));
+        if (!LightlessLoaded()) ImGui.TextWrapped(T("Lightless не загружен.", "Lightless is not loaded."));
+        if (lastInviteReason.Length > 0) ImGui.TextWrapped(T("Последняя проверка меню приглашения: ", "Last invitation menu check: ") + lastInviteReason);
         var partner = LinkedPartner;
         ImGui.TextWrapped(link?.Snapshot.State == "linked"
             ? T("Партнёр: ", "Partner: ") + (partner?.Name.TextValue ?? T("не рядом", "not nearby"))

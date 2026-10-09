@@ -34,6 +34,7 @@ public sealed partial class Plugin
     private long lightlessActorCheckAt;
     private nint lightlessActor;
     private bool lightlessActorHandled;
+    private string lightlessIpcError = "";
 
     private bool LightlessLoaded()
     {
@@ -52,8 +53,18 @@ public sealed partial class Plugin
         {
             lightlessActor = address;
             lightlessActorCheckAt = Environment.TickCount64 + 250;
-            try { lightlessActorHandled = Pi.GetIpcSubscriber<List<nint>>("LightlessSync.GetHandledAddresses").InvokeFunc().Contains(address); }
-            catch { lightlessActorHandled = false; }
+            try
+            {
+                lightlessActorHandled = Pi.GetIpcSubscriber<List<nint>>("LightlessSync.GetHandledAddresses").InvokeFunc().Contains(address);
+                lightlessIpcError = "";
+            }
+            catch (Exception ex)
+            {
+                lightlessActorHandled = false;
+                var error = ex.GetType().Name;
+                if (lightlessIpcError != error) Log.Warning("Pair Lightless API check failed: " + error);
+                lightlessIpcError = error;
+            }
         }
         return lightlessActorHandled;
     }

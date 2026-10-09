@@ -87,7 +87,13 @@ public sealed class LinkClient : IDisposable
             }
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
-        catch { Volatile.Write(ref snapshot, new("error", "", "", 0, Environment.TickCount64, "Pair connection lost. Reconnect in Settings.")); }
+        catch (Exception ex)
+        {
+            var detail = ex is HttpRequestException request && request.StatusCode is { } code
+                ? $"HTTP {(int)code}" : ex.GetType().Name;
+            Volatile.Write(ref snapshot, new("error", "", "", 0, Environment.TickCount64,
+                $"Pair connection failed ({detail}). Reconnect in Settings."));
+        }
         finally
         {
             if (token is not null)
