@@ -68,6 +68,65 @@ class LinkTests(unittest.TestCase):
         self.assertEqual(self.store.action(self.a)['state'], 'idle')
         self.assertEqual(self.store.action(self.b)['state'], 'idle')
 
+    def linked(self):
+        nonce = self.invite()['invitation']
+        self.store.action(self.b, 'accept', invitation=nonce)
+
+    def proposal(self):
+        return dict(id='1'*64, family='2'*64, command='3'*64, role='4'*64)
+
+    def test_launch_requires_recipient_acceptance(self):
+        self.linked()
+        self.store.action(self.a, 'propose', offer=self.proposal())
+        a = self.store.action(self.a)['launch']
+        b = self.store.action(self.b)['launch']
+        self.assertFalse(a['incoming'])
+        self.assertTrue(b['incoming'])
+        self.assertEqual(b['status'], 'waiting')
+        with self.assertRaises(ValueError):
+            self.store.action(self.a, 'accept_launch', invitation='1'*64)
+        with self.assertRaises(ValueError):
+            self.store.action(self.b, 'accept_launch', invitation='9'*64)
+        self.store.action(self.b, 'accept_launch', invitation='1'*64)
+        self.assertEqual(self.store.action(self.a)['launch']['status'], 'accepted')
+        self.store.action(self.a, 'finish_launch', invitation='1'*64)
+        self.assertIsNotNone(self.store.action(self.b)['launch'])
+        self.store.action(self.b, 'finish_launch', invitation='1'*64)
+        self.assertIsNone(self.store.action(self.a)['launch'])
+        self.assertEqual(self.store.action(self.a)['state'], 'linked')
+
+    def test_launch_decline_cancel_and_competing_proposal(self):
+        self.linked()
+        self.store.action(self.a, 'propose', offer=self.proposal())
+        with self.assertRaises(ValueError):
+            self.store.action(self.b, 'propose', offer=self.proposal())
+        self.store.action(self.b, 'reject_launch', invitation='1'*64)
+        self.assertIsNone(self.store.action(self.a)['launch'])
+        self.store.action(self.a, 'propose', offer=self.proposal())
+        self.store.action(self.a, 'cancel_launch', invitation='1'*64)
+        self.assertIsNone(self.store.action(self.b)['launch'])
+
+    def test_launch_expiry_and_payload_boundaries(self):
+        self.linked()
+        with self.assertRaises(ValueError):
+            self.store.action(self.a, 'propose', offer=dict(self.proposal(), x=1))
+        with self.assertRaises(ValueError):
+            self.store.action(self.a, 'propose', offer=dict(self.proposal(), command='/dance'))
+        self.store.action(self.a, 'propose', offer=self.proposal())
+        for _ in range(12):
+            self.now += 5
+            self.store.action(self.a)
+            self.store.action(self.b)
+        self.assertIsNone(self.store.action(self.b)['launch'])
+        with self.assertRaises(ValueError):
+            self.store.action(self.b, 'accept_launch', invitation='1'*64)
+
+    def test_disconnect_clears_launch(self):
+        self.linked()
+        self.store.action(self.a, 'propose', offer=self.proposal())
+        self.store.action(self.b, 'disconnect')
+        self.assertIsNone(self.store.action(self.a)['launch'])
+
 
 if __name__ == '__main__':
     unittest.main()

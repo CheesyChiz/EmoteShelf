@@ -64,6 +64,23 @@ public sealed partial class Plugin
 
     private void BeginPair(Bookmark bookmark)
     {
+        if (link?.Snapshot.Launch is not null)
+        {
+            linkNotice = T("Уже есть предложение анимации. Прими или отклони его в уведомлении.", "An animation proposal is already pending. Accept or decline it in the notification.");
+            linkNoticeUntil = Environment.TickCount64 + 5000;
+            return;
+        }
+        var id = PairRules.Hash(Guid.NewGuid().ToString());
+        BeginPairCore(bookmark, id);
+        if (pairSession is not null && pairBookmark is not null)
+        {
+            var mod = discovered.First(m => m.Directory == bookmark.ModDirectory && m.Command.Equals(bookmark.Command, StringComparison.OrdinalIgnoreCase));
+            link!.Act("propose", offer: new LaunchOffer(id, PairRules.Family(mod.Name), PairRules.Hash(bookmark.Command.ToLowerInvariant()), OfferRole(bookmark)));
+        }
+    }
+
+    private void BeginPairCore(Bookmark bookmark, string offerId)
+    {
         CancelPair();
         pairPopup = true;
         pairCollectionWarning = "";
@@ -105,8 +122,11 @@ public sealed partial class Plugin
             pairFacing = local.Rotation;
             pairTargetOrigin = target.Position;
             pairDeadline = Environment.TickCount64 + 60000;
-            pairSession = new(pairSelf, pairOther, PairRules.Family(mod.Name), config.PairAlign);
-            pairMessage = T("Ожидаю, пока партнёр выберет свою роль и нажмёт «В паре».", "Waiting for your partner to choose their role and click Pair.");
+            pairOfferId = offerId;
+            pairOfferSeen = false;
+            pairOfferQueuedAt = Environment.TickCount64;
+            pairSession = new(pairSelf, pairOther, PairRules.Hash(PairRules.Family(mod.Name) + offerId), config.PairAlign);
+            pairMessage = T("Отправлено предложение анимации. Партнёр выбирает роль в уведомлении и подтверждает запуск.", "Animation proposed. Your partner chooses a role in the notification and accepts the launch.");
         }
         catch (Exception ex) { CancelPair(ex.Message); }
     }
@@ -119,6 +139,8 @@ public sealed partial class Plugin
 
     private void CancelPair(string? reason = null)
     {
+        if (pairOfferId.Length > 0) link?.Act("cancel_launch", invitation: pairOfferId);
+        pairOfferId = "";
         if (pairSession is not null)
         {
             reason ??= T("Запуск в паре отменён.", "Pair launch cancelled.");
@@ -156,6 +178,11 @@ public sealed partial class Plugin
                 throw new InvalidOperationException(T("Автовыбор поз отключён; общий запуск отменён.", "Automatic poses disabled; pair launch cancelled."));
             if (snapshot.State == "error") throw new InvalidOperationException(snapshot.Error);
             if (now - snapshot.ReceivedAt > 4000) throw new InvalidOperationException(T("Сервер не отвечает; запуск отменён.", "Relay stopped responding; launch cancelled."));
+            var proposal = link?.Snapshot.Launch;
+            if (proposal?.Offer.Id == pairOfferId) pairOfferSeen = true;
+            else if (pairOfferSeen || now - pairOfferQueuedAt > 5000)
+                throw new InvalidOperationException(T("Предложение отклонено, отменено или истекло.", "Animation proposal declined, cancelled or expired."));
+            if (proposal?.Offer.Id != pairOfferId || proposal.Status != "accepted") return;
             if (pairAlignment?.Error.Length > 0 && pairAlignStarted) throw new InvalidOperationException(pairAlignment.Error);
             var mayApproach = snapshot.Align && !snapshot.Anchor && pairAlignStarted && !pairStartedPreparation;
             if (!mayApproach && (Vector3.Distance(local.Position, pairOrigin) > .08f ||
@@ -200,6 +227,8 @@ public sealed partial class Plugin
             ValidatePairSelection();
             DispatchPreparedCommand(pairHeldCommand);
             pairSession.Complete();
+            link?.Act("finish_launch", invitation: pairOfferId);
+            pairOfferId = "";
             pairSession = null;
             pairHeldCommand = "";
             pairBookmark = null;
@@ -230,8 +259,8 @@ public sealed partial class Plugin
         DrawLinkSettings();
         ImGui.TextWrapped(LightlessLoaded() ? T("Lightless Sync загружен. Перед запуском дождитесь завершения синхронизации у обоих.", "Lightless Sync is loaded. Wait for synchronization to finish on both sides before launch.") :
             T("Требуется Lightless Sync у обоих участников. Одиночные эмоции его не требуют.", "Lightless Sync is required for both participants. Solo emotes do not require it."));
-        ImGui.TextWrapped(T("После принятия приглашения каждый выбирает свою роль одного мода и нажимает «В паре» или Shift+иконку. Таргет держать не нужно. Используется сервер Emote Shelf: он видит IP и хеши персонажей/мода; личность игрового персонажа не проверяется сервером. Только с доверенным партнёром.",
-            "After accepting an invitation, each player chooses their role of the same mod and clicks Pair or Shift+icon. Keeping a target is not required. The Emote Shelf relay sees IP addresses and character/mod hashes; game identity is not authenticated. Use with trusted partners only."));
+        ImGui.TextWrapped(T("После установления связи «В паре» или Shift+иконка отправляет предложение анимации. Партнёр выбирает свою роль в уведомлении и принимает запуск либо отказывается. Таргет держать не нужно. Сервер Emote Shelf видит IP и хеши персонажей/мода/выбора; личность персонажа не проверяется. Только с доверенным партнёром.",
+            "Once linked, Pair or Shift+icon proposes an animation. Your partner selects their role in the notification and accepts or declines. Keeping a target is not required. The Emote Shelf relay sees IP addresses and character/mod/selection hashes; character identity is not authenticated. Use with trusted partners only."));
         if (ImGui.Checkbox(T("Разрешить короткий подход и выравнивание перед запуском", "Allow a short approach and alignment before launch"), ref config.PairAlign)) { CancelPair(); Save(); }
         ImGui.TextWrapped(T("Выравнивание — только с разрешения обоих, до 2 ялмов, без телепортации. Один стоит, второй подходит. Это общий запуск команд, не точная синхронизация кадров; sit/idle особенно требуют проверки.",
             "Alignment requires both players to opt in, within 2 yalms, without teleporting. One stands still, the other approaches. This is a shared command start, not frame-accurate synchronization; sit/idle particularly need testing."));

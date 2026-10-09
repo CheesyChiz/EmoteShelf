@@ -156,7 +156,7 @@ class Handler(BaseHTTPRequestHandler):
                     if set(data) != {'identity'}:
                         raise ValueError('Invalid message')
                     return self.reply(200, dict(token=links.register(data['identity'])))
-                if set(data) != {'action', 'target', 'invitation'} or not all(isinstance(v, str) for v in data.values()):
+                if set(data) not in ({'action', 'target', 'invitation'}, {'action', 'target', 'invitation', 'offer'}) or not all(isinstance(data[k], str) for k in ('action', 'target', 'invitation')):
                     raise ValueError('Invalid message')
                 return self.reply(200, links.action(self.token(), **data))
             if self.path in ('/v1/prepared', '/v1/finished'):

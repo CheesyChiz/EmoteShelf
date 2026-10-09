@@ -35,7 +35,7 @@ public sealed partial class Plugin
         if (s.Error.Length > 0) { linkNotice = s.Error; linkNoticeUntil = Environment.TickCount64 + 5000; }
         if (s.State != lastLinkState || s.Partner != lastLinkPartner)
         {
-            if (s.State == "linked") linkNotice = T("Партнёр подключён. Каждый выбирает свою роль и нажимает Shift+иконку.", "Partner connected. Each player chooses their role and presses Shift+icon.");
+            if (s.State == "linked") linkNotice = T("Партнёр подключён. Shift+иконка отправляет предложение анимации с выбором роли.", "Partner connected. Shift+icon sends an animation proposal with role selection.");
             else if (lastLinkState == "linked") { CancelPair(); linkNotice = T("Связь с партнёром завершена.", "Partner connection ended."); }
             else if (s.State == "idle" && lastLinkState is "incoming" or "outgoing") linkNotice = T("Приглашение отклонено, отменено или истекло.", "Invitation declined, cancelled or expired.");
             if (linkNotice.Length > 0) linkNoticeUntil = Environment.TickCount64 + 6000;
@@ -82,7 +82,8 @@ public sealed partial class Plugin
         var s = link?.Snapshot;
         var invite = LinkFresh && s?.State == "incoming";
         var outgoing = LinkFresh && s?.State == "outgoing";
-        if (!linkPreview && !invite && !outgoing && Environment.TickCount64 >= linkNoticeUntil) { linkPositionApplied = false; return; }
+        var launch = LinkFresh && s?.Launch is { Status: "waiting" };
+        if (!linkPreview && !invite && !outgoing && !launch && Environment.TickCount64 >= linkNoticeUntil) { linkPositionApplied = false; return; }
         var viewport = ImGui.GetMainViewport();
         if (!linkPositionApplied)
         {
@@ -96,7 +97,8 @@ public sealed partial class Plugin
             var pos = ImGui.GetWindowPos() - viewport.WorkPos;
             if (!ImGui.IsMouseDown(ImGuiMouseButton.Left) && (Math.Abs(config.PairNoticeX-pos.X) > 1 || Math.Abs(config.PairNoticeY-pos.Y) > 1))
             { config.PairNoticeX = pos.X; config.PairNoticeY = pos.Y; Save(); }
-            if (invite || outgoing)
+            if (launch) DrawLaunchInvitation(s!.Launch!);
+            else if (invite || outgoing)
             {
                 var actor = LinkActor(s!.Partner);
                 ImGui.TextWrapped((actor?.Name.TextValue ?? T("Игрок не рядом", "Player not nearby")) + $" · {s.Remaining}s");
