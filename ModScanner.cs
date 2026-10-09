@@ -6,6 +6,7 @@ namespace EmoteShelf;
 public sealed record EmoteVariant(string Group, string Option, string[] Paths, string? OffOption)
 {
     public Dictionary<string, string> Files { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    public bool Multi { get; init; }
 }
 public sealed record EmoteMod(string Directory, string Name, string EmoteName, string Command, uint Icon, string[] Paths,
     EmoteVariant[] Variants, int? PoseIndex)
@@ -90,7 +91,9 @@ public static partial class ModScanner
             if (byCommand.Count == 0) byCommand[""] = ("Unknown emote", 0, [.. paths]);
             foreach (var (command, entry) in byCommand)
             {
-                var relevant = variants.Where(v => v.Paths.Any(p => entry.Paths.Contains(p, StringComparer.OrdinalIgnoreCase)))
+                var relevantGroups = variants.Where(v => v.Paths.Any(p => entry.Paths.Contains(p, StringComparer.OrdinalIgnoreCase)))
+                    .Select(v => v.Group).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var relevant = variants.Where(v => relevantGroups.Contains(v.Group) || v.Paths.Length == 0)
                     .DistinctBy(v => (v.Group, v.Option)).ToArray();
                 var poseSlots = command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase)
                     ? PoseSlot.AllFromPaths(entry.Paths, "j_")
@@ -130,6 +133,7 @@ public static partial class ModScanner
     private static void CollectDirectFiles(JsonElement root, HashSet<string> paths)
     {
         if (root.ValueKind != JsonValueKind.Object) return;
+        if (root.TryGetProperty("DefaultData", out var defaultData)) CollectDirectFiles(defaultData, paths);
         foreach (var key in new[] { "Files", "FileSwaps" })
         {
             if (!root.TryGetProperty(key, out var files) || files.ValueKind != JsonValueKind.Object) continue;
@@ -155,7 +159,7 @@ public static partial class ModScanner
     {
         if (group.ValueKind != JsonValueKind.Object ||
             !group.TryGetProperty("Type", out var type) || type.ValueKind != JsonValueKind.String ||
-            !string.Equals(type.GetString(), "Single", StringComparison.OrdinalIgnoreCase) ||
+            !(string.Equals(type.GetString(), "Single", StringComparison.OrdinalIgnoreCase) || string.Equals(type.GetString(), "Multi", StringComparison.OrdinalIgnoreCase)) ||
             !group.TryGetProperty("Options", out var options) || options.ValueKind != JsonValueKind.Array) return;
         var groupName = group.TryGetProperty("Name", out var n) ? n.GetString() ?? "" : "";
         if (groupName.Length == 0) return;
@@ -171,7 +175,7 @@ public static partial class ModScanner
             if (optionName.Length == 0) continue;
             var optionPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             Collect(option, optionPaths);
-            if (optionPaths.Count > 0)
+            if (option.TryGetProperty("Files", out _) || option.TryGetProperty("FileSwaps", out _))
             {
                 var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 if (option.TryGetProperty("Files", out var filesJson) && filesJson.ValueKind == JsonValueKind.Object)
@@ -180,7 +184,7 @@ public static partial class ModScanner
                             optionPaths.Contains(file.Name.Replace('\\', '/')))
                             files[file.Name.Replace('\\', '/').ToLowerInvariant()] = file.Value.GetString() ?? "";
                 variants.Add(new EmoteVariant(groupName, optionName, [.. optionPaths], offOption)
-                    { Files = files });
+                    { Files = files, Multi = string.Equals(type.GetString(), "Multi", StringComparison.OrdinalIgnoreCase) });
             }
         }
     }

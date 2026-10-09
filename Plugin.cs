@@ -8,6 +8,7 @@ using FFXIVClientStructs.FFXIV.Client.System.String;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.Game.Control;
 using FFXIVClientStructs.FFXIV.Client.Game.UI;
+using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using Penumbra.Api.Enums;
 using Penumbra.Api.IpcSubscribers;
@@ -57,8 +58,6 @@ public sealed class Plugin : IDalamudPlugin
     private long poseAt;
     private long poseReadyDeadline;
     private int poseAttempts;
-    private bool poseStepAwaiting;
-    private long poseStepDeadline;
     private bool initialScanPending = true;
     private string pendingModDirectory = "";
     private Guid pendingCollection;
@@ -80,6 +79,19 @@ public sealed class Plugin : IDalamudPlugin
     private string selectedFolderName = "";
     private string selectedModDirectory = "";
     private int folderEditMode;
+    private Bookmark? manualPoseBookmark;
+    private int manualPoseTarget = -1;
+    private Bookmark? launchingBookmark;
+    private bool selectEmotesTab;
+    private string rightClickMod = "";
+    private bool scrollToSelectedMod;
+    private string draggedFolder = "";
+    private bool createAtRoot;
+    private bool showAllVariants;
+    private PapCompatibility? papCompatibility;
+    private bool papTableLoaded;
+    private readonly Dictionary<(ushort, string), bool?> compatibilityCache = [];
+    private readonly Dictionary<string, Dictionary<string, List<string>>> draftOptions = new(StringComparer.OrdinalIgnoreCase);
     private string draggedModDirectory = "";
 
     public Plugin()
@@ -92,6 +104,15 @@ public sealed class Plugin : IDalamudPlugin
         config.PoseOverrides ??= new(StringComparer.OrdinalIgnoreCase);
         config.Folders ??= [];
         config.ModFolders ??= new(StringComparer.OrdinalIgnoreCase);
+        config.ClosedFolders ??= new(StringComparer.OrdinalIgnoreCase);
+        collapsedFolders.UnionWith(config.ClosedFolders);
+        expandedFolders.UnionWith(config.Folders.Except(collapsedFolders));
+        if (!config.ManualPoseMigration)
+        {
+            config.AutomaticPose = false;
+            config.ManualPoseMigration = true;
+            Save();
+        }
         if (string.IsNullOrEmpty(config.Language)) config.Language = config.English ? "en" : "ru";
         status = T("Поиск замен эмоций в Penumbra…", "Searching Penumbra emote replacements…");
         Commands.AddHandler("/eshelf", new CommandInfo(OnCommand) { HelpMessage = "Emote Shelf: /eshelf, /eshelf scan, /eshelf show, /eshelf hide" });
@@ -182,12 +203,13 @@ public sealed class Plugin : IDalamudPlugin
 
     private void Play(Bookmark bookmark)
     {
+        manualPoseBookmark = null;
+        launchingBookmark = bookmark;
         waitingForStand = null;
         standSettledAt = 0;
         pendingCommand = "";
         pendingModDirectory = "";
         pendingPoseIndex = -1;
-        poseStepAwaiting = false;
         if (!ModScanner.ValidCommand(bookmark.Command)) { status = T("У закладки нет корректной команды эмоции.", "The bookmark has no valid emote command."); return; }
         if (Objects.LocalPlayer is not { } player) { status = T("Персонаж не в игре.", "Character is not in game."); return; }
         var selected = discovered.FirstOrDefault(m => m.Directory == bookmark.ModDirectory &&
@@ -281,7 +303,6 @@ public sealed class Plugin : IDalamudPlugin
             pendingPoseType = bookmark.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase)
                 ? EmoteController.PoseType.GroundSit : EmoteController.PoseType.Idle;
             poseAttempts = 0;
-            poseStepAwaiting = false;
             status = string.Format(T("Выбрано: {0} → {1}", "Selected: {0} → {1}"), selected.Name, pendingCommand);
         }
         catch (Exception ex)
@@ -358,9 +379,11 @@ public sealed class Plugin : IDalamudPlugin
                         Log.Debug("Same-mod option override for {GamePath}: {EffectivePath}", gamePath, effectivePath);
                 }
                 if (!(IsStandingPoseCommand(command) && pendingPoseIndex >= 0))
-                    ExecuteEmote(command);
+                    ExecutePreparedEmote(command);
                 if (pendingPoseIndex >= 0)
                 {
+                    manualPoseBookmark = launchingBookmark;
+                    manualPoseTarget = pendingPoseIndex;
                     poseAt = Environment.TickCount64 + 100;
                     poseReadyDeadline = Environment.TickCount64 + 5000;
                 }
@@ -392,22 +415,6 @@ public sealed class Plugin : IDalamudPlugin
                 else poseAt = Environment.TickCount64 + 200;
                 return;
             }
-            if (poseStepAwaiting)
-            {
-                  if (currentPose != pendingPoseIndex)
-                {
-                    if (Environment.TickCount64 >= poseStepDeadline)
-                    {
-                        pendingPoseIndex = -1;
-                        poseStepAwaiting = false;
-                        status = T("Игра не подтвердила шаг /cpose; остановлено, чтобы не проскочить нужную позу.",
-                            "The game did not confirm the /cpose step; stopped to avoid overshooting the target pose.");
-                          Log.Warning("Pose selection was not confirmed: {State}", PoseDiagnostics());
-                    }
-                    return;
-                }
-                poseStepAwaiting = false;
-            }
             var highestPose = EmoteController.GetAvailablePoses(pendingPoseType);
             if (pendingPoseIndex > highestPose)
             {
@@ -416,25 +423,23 @@ public sealed class Plugin : IDalamudPlugin
                 pendingPoseIndex = -1;
                 return;
             }
-              if (currentPose == pendingPoseIndex && poseAttempts > 0)
+              if (currentPose == pendingPoseIndex)
             {
                   status = string.Format(T("Игра сообщает слот {0:00}.", "Game reports slot {0:00}."), currentPose);
                   Log.Information("Pose confirmed: {State}", PoseDiagnostics());
                 pendingPoseIndex = -1;
                 return;
             }
-              if (poseAttempts++ >= 1)
+              if (poseAttempts++ >= 8)
             {
                 pendingPoseIndex = -1;
                 status = T("Не удалось переключить нужную позу. Попробуй /cpose вручную.", "Could not reach the target pose. Try /cpose manually.");
                 return;
             }
-              SelectPoseDirect(pendingPoseType, pendingPoseIndex);
-            poseStepAwaiting = true;
-            poseStepDeadline = Environment.TickCount64 + 2500;
+              ExecuteEmote("/cpose");
             status = string.Format(T("Переключаю позу {0} → {1} (шаг {2}).", "Changing pose {0} → {1} (step {2})."),
                 currentPose + 1, pendingPoseIndex + 1, poseAttempts);
-            poseAt = Environment.TickCount64 + 500;
+            poseAt = Environment.TickCount64 + 100;
         }
         catch (Exception ex) { pendingPoseIndex = -1; status = ex.Message; Log.Warning(ex, "Pose switch failed"); }
     }
@@ -457,24 +462,6 @@ public sealed class Plugin : IDalamudPlugin
             ? controller->CPoseState : -1;
     }
 
-    private unsafe void SelectPoseDirect(EmoteController.PoseType type, int target)
-    {
-        if (CurrentPoseIndex(type) < 0) throw new InvalidOperationException("Pose context changed before /cpose.");
-        var state = PlayerState.Instance();
-        if (state == null) throw new InvalidOperationException("Player state is unavailable.");
-        var previous = state->SelectedPoses[(int)type];
-        var predecessor = PoseSelection.Predecessor(target, EmoteController.GetAvailablePoses(type));
-        Log.Information("Pose request {Type} target={Target}: {State}", type, target, PoseDiagnostics());
-        // SecretTweaks ChangePoseDirect uses this technique: stage the preference,
-        // then let the normal game command advance it. Do not write actor state.
-        state->SelectedPoses[(int)type] = predecessor;
-        try { ExecuteEmote("/cpose"); }
-        finally
-        {
-            if (state->SelectedPoses[(int)type] == predecessor)
-                state->SelectedPoses[(int)type] = previous;
-        }
-    }
 
     private unsafe bool IsGroundSitting()
     {
@@ -483,6 +470,21 @@ public sealed class Plugin : IDalamudPlugin
         var character = (Character*)player.Address;
         return (character->Mode is CharacterModes.EmoteLoop or CharacterModes.InPositionLoop) &&
                character->ModeParam == 1;
+    }
+
+    private unsafe void ExecutePreparedEmote(string command)
+    {
+        // Initial ground-sit selection happens after redraw and before entering the
+        // stance, never while already seated. Active poses use ordinary /cpose.
+        var state = PlayerState.Instance();
+        if (!config.AutomaticPose || !command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ||
+            pendingPoseIndex < 0 || pendingPoseIndex > EmoteController.GetAvailablePoses(EmoteController.PoseType.GroundSit) ||
+            IsGroundSitting() || state == null)
+        { ExecuteEmote(command); return; }
+        var old = state->SelectedPoses[(int)EmoteController.PoseType.GroundSit];
+        state->SelectedPoses[(int)EmoteController.PoseType.GroundSit] = (byte)pendingPoseIndex;
+        try { ExecuteEmote(command); }
+        catch { state->SelectedPoses[(int)EmoteController.PoseType.GroundSit] = old; throw; }
     }
 
     private unsafe string PoseDiagnostics()
@@ -551,7 +553,8 @@ public sealed class Plugin : IDalamudPlugin
             if (i % columns != 0) ImGui.SameLine();
             var icon = Textures.GetFromGameIcon(new GameIconLookup(bookmark.IconId == 0 ? 19u : bookmark.IconId)).GetWrapOrDefault();
             ImGui.PushID(i);
-            var clicked = icon is not null
+            var isPose = ReferenceEquals(manualPoseBookmark, bookmark);
+            var clicked = isPose ? ImGui.Button("↻##cpose", size) : icon is not null
                 ? ImGui.ImageButton(icon.Handle, size)
                 : ImGui.Button(bookmark.Command, size);
             if (clicked)
@@ -559,28 +562,72 @@ public sealed class Plugin : IDalamudPlugin
                 if (ImGui.GetIO().KeyCtrl && ImGui.GetIO().KeyShift)
                 {
                     config.Bookmarks.RemoveAt(i);
+                    if (isPose) manualPoseBookmark = null;
                     Save();
                     i--;
                 }
+                else if (isPose) { pendingPoseIndex = -1; ExecuteEmote("/cpose"); }
                 else Play(bookmark);
             }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{bookmark.Name}\n{bookmark.Command}\n{T("Ctrl+Shift+клик — убрать с панели", "Ctrl+Shift+click — remove from panel")}");
+            if (ImGui.IsItemClicked(ImGuiMouseButton.Right))
+            {
+                selectedModDirectory = bookmark.ModDirectory;
+                rightClickMod = bookmark.ModDirectory;
+                scrollToSelectedMod = true;
+                var folder = FolderFor(bookmark.ModDirectory);
+                foreach (var parent in FolderTree.Ancestors(folder).Append(folder))
+                { expandedFolders.Add(parent); collapsedFolders.Remove(parent); }
+                search = "";
+                settingsOpen = true;
+                selectEmotesTab = true;
+                expandedVariants.Add($"{bookmark.ModDirectory}|{bookmark.Command}");
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{bookmark.Name}\n{(isPose ? ManualPoseHint(bookmark) : bookmark.Command)}\n{T("ПКМ — открыть мод; Ctrl+Shift+клик — убрать", "Right-click — open mod; Ctrl+Shift+click — remove")}");
             ReorderBookmarkDragDrop(i);
             ImGui.PopID();
+        }
+        if (manualPoseBookmark is { } poseBookmark)
+        {
+            ImGui.TextUnformatted(ManualPoseHint(poseBookmark));
+            if (ImGui.SmallButton(T("Готово", "Done"))) { manualPoseBookmark = null; pendingPoseIndex = -1; }
         }
         ImGui.End();
         ImGui.PopStyleVar();
     }
 
+    private string ManualPoseHint(Bookmark bookmark)
+    {
+        var type = bookmark.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase)
+            ? EmoteController.PoseType.GroundSit : EmoteController.PoseType.Idle;
+        var current = CurrentPoseIndex(type);
+        return $"/cpose · {T("слот игры", "reported slot")}: {(current < 0 ? "?" : current.ToString("00"))} → {(manualPoseTarget < 0 ? "?" : manualPoseTarget.ToString("00"))}\n{T("Нажимай ↻ до нужной позы, затем «Готово».", "Click ↻ until the desired pose, then Done.")}";
+    }
+
     private void DrawSettings()
     {
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(.055f, .06f, .085f, .97f));
+        ImGui.PushStyleColor(ImGuiCol.ChildBg, new Vector4(.075f, .08f, .11f, .95f));
+        ImGui.PushStyleColor(ImGuiCol.Border, new Vector4(.27f, .24f, .36f, .7f));
+        ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(.25f, .19f, .36f, 1));
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(.39f, .29f, .53f, 1));
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(.48f, .34f, .65f, 1));
+        ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(.25f, .20f, .35f, 1));
+        ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Vector4(.32f, .25f, .44f, 1));
+        ImGui.PushStyleColor(ImGuiCol.FrameBg, new Vector4(.115f, .12f, .165f, 1));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 10f);
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 5f);
+        ImGui.PushStyleVar(ImGuiStyleVar.ChildRounding, 7f);
+        ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(9, 7));
+        try
+        {
         ImGui.SetNextWindowSize(new Vector2(850, 650), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(new Vector2(540, 360), new Vector2(1600, 1200));
         if (!ImGui.Begin("Emote Shelf##settings", ref settingsOpen)) { ImGui.End(); return; }
         if (ImGui.BeginTabBar("##tabs"))
         {
-            if (ImGui.BeginTabItem(T("Эмоции", "Emotes") + "###emotes"))
+            if (ImGui.BeginTabItem(T("Эмоции", "Emotes") + "###emotes", selectEmotesTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
             {
+                selectEmotesTab = false;
                 DrawEmoteTabTwoPane();
                 ImGui.EndTabItem();
             }
@@ -590,6 +637,8 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.EndTabBar();
         }
         ImGui.End();
+        }
+        finally { ImGui.PopStyleVar(4); ImGui.PopStyleColor(9); }
     }
 
     private string T(string ru, string en) => Localization.Get(config.Language, ru, en);
@@ -600,12 +649,12 @@ public sealed class Plugin : IDalamudPlugin
             "Select a mod on the left, then preview and add its emote on the right. Bookmarks save automatically."));
         if (ImGui.SmallButton(T("Обновить список", "Refresh list"))) Scan();
         ImGui.SameLine();
-        ImGui.TextDisabled(status);
+        ImGui.TextWrapped(status);
         if (config.HiddenMods.Count > 0)
             ImGui.TextDisabled(T("Скрытые моды можно вернуть во вкладке «Настройки».", "Restore hidden mods on the Settings tab."));
         ImGui.InputTextWithHint("##search", T("Поиск по эмоции или моду", "Search emote or mod"), ref search, 120);
 
-        var groups = discovered.Where(m => m.Command.Length > 0 && !config.HiddenMods.Contains(m.Directory))
+        var groups = discovered.Where(m => m.Command.Length > 0 && (!config.HiddenMods.Contains(m.Directory) || m.Directory == rightClickMod))
             .GroupBy(m => m.Directory, StringComparer.OrdinalIgnoreCase)
             .Where(g => g.Any(m => m.Name.Contains(search, StringComparison.OrdinalIgnoreCase) ||
                 m.EmoteName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
@@ -618,22 +667,28 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.BeginChild("##leftPane", new Vector2(leftWidth, 0), false);
         if (ImGui.BeginChild("##modTree", new Vector2(0, -36), true))
         {
-            foreach (var folder in config.Folders.Concat([""]))
+            foreach (var folder in config.Folders.Order(StringComparer.OrdinalIgnoreCase).Concat([""]).ToArray())
             {
+                if (search.Length == 0 && FolderTree.Ancestors(folder).Any(collapsedFolders.Contains)) continue;
+                var indent = folder.Count(c => c == '/') * 14f;
+                if (indent > 0) ImGui.Indent(indent);
                 if (folder.Length > 0)
                 {
                     ImGui.PushID(folder);
                     var open = !collapsedFolders.Contains(folder) && (expandedFolders.Contains(folder) || search.Length > 0);
-                    if (ImGui.Selectable($"{(open ? "▼" : "▶")} {folder}##folder", selectedFolderName == folder))
+                    if (ImGui.Selectable($"{(open ? "▼" : "▶")} {FolderTree.Name(folder)}##folder", selectedFolderName == folder))
                     {
                         selectedFolderName = folder;
                         if (open) { expandedFolders.Remove(folder); collapsedFolders.Add(folder); }
                         else { collapsedFolders.Remove(folder); expandedFolders.Add(folder); }
                         open = !open;
+                        config.ClosedFolders = new(collapsedFolders, StringComparer.OrdinalIgnoreCase); Save();
                     }
+                    if (ImGui.BeginDragDropSource())
+                    { draggedFolder = folder; ImGui.SetDragDropPayload("ESHELF_FOLDER", new byte[] { 1 }); ImGui.TextUnformatted(folder); ImGui.EndDragDropSource(); }
                     AcceptModDrop(folder);
                     ImGui.PopID();
-                    if (!open) continue;
+                    if (!open) { if (indent > 0) ImGui.Unindent(indent); continue; }
                 }
                 else if (config.Folders.Count > 0)
                 {
@@ -645,6 +700,7 @@ public sealed class Plugin : IDalamudPlugin
                     ImGui.PushID(group.Key);
                     if (ImGui.Selectable(group.First().Name, selectedModDirectory == group.Key))
                     { selectedModDirectory = group.Key; selectedFolderName = folder; }
+                    if (scrollToSelectedMod && selectedModDirectory == group.Key) { ImGui.SetScrollHereY(.5f); scrollToSelectedMod = false; }
                     if (ImGui.BeginDragDropSource())
                     {
                         draggedModDirectory = group.Key;
@@ -654,15 +710,16 @@ public sealed class Plugin : IDalamudPlugin
                     }
                     ImGui.PopID();
                 }
+                if (indent > 0) ImGui.Unindent(indent);
             }
         }
         ImGui.EndChild();
         ImGui.PushID("folderBar");
-        if (ImGui.SmallButton("+")) { folderEditMode = 1; newFolderName = ""; ImGui.OpenPopup("##folderEdit"); }
+        if (ImGui.SmallButton("+")) { folderEditMode = 1; createAtRoot = false; newFolderName = ""; ImGui.OpenPopup("##folderEdit"); }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(T("Создать папку", "Create folder"));
         ImGui.SameLine();
         ImGui.BeginDisabled(selectedFolderName.Length == 0);
-        if (ImGui.SmallButton("✎")) { folderEditMode = 2; newFolderName = selectedFolderName; ImGui.OpenPopup("##folderEdit"); }
+        if (ImGui.SmallButton("✎")) { folderEditMode = 2; newFolderName = FolderTree.Name(selectedFolderName); ImGui.OpenPopup("##folderEdit"); }
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(T("Переименовать папку", "Rename folder"));
         ImGui.SameLine();
         if (ImGui.SmallButton("×")) ImGui.OpenPopup("##deleteFolder");
@@ -670,6 +727,8 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.EndDisabled();
         if (ImGui.BeginPopup("##folderEdit"))
         {
+            if (folderEditMode == 1) ImGui.Checkbox(T("Создать в корне", "Create at root"), ref createAtRoot);
+            ImGui.TextUnformatted(folderEditMode == 1 && !createAtRoot ? selectedFolderName : FolderTree.Parent(selectedFolderName));
             ImGui.InputText(T("Название папки", "Folder name"), ref newFolderName, 60);
             if (ImGui.Button(T("Сохранить", "Save")))
             {
@@ -683,11 +742,12 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.TextWrapped(T("Моды останутся в каталоге без папки.", "Mods will remain in the catalog, unfiled."));
             if (ImGui.Button(T("Удалить папку", "Delete folder")))
             {
-                config.Folders.RemoveAll(f => f.Equals(selectedFolderName, StringComparison.OrdinalIgnoreCase));
-                foreach (var directory in config.ModFolders.Where(x => x.Value.Equals(selectedFolderName, StringComparison.OrdinalIgnoreCase))
+                config.Folders.RemoveAll(f => FolderTree.Contains(selectedFolderName, f));
+                foreach (var directory in config.ModFolders.Where(x => FolderTree.Contains(selectedFolderName, x.Value))
                     .Select(x => x.Key).ToArray()) config.ModFolders.Remove(directory);
-                expandedFolders.Remove(selectedFolderName);
-                collapsedFolders.Remove(selectedFolderName);
+                expandedFolders.RemoveWhere(f => FolderTree.Contains(selectedFolderName, f));
+                collapsedFolders.RemoveWhere(f => FolderTree.Contains(selectedFolderName, f));
+                config.ClosedFolders = new(collapsedFolders, StringComparer.OrdinalIgnoreCase);
                 selectedFolderName = "";
                 Save();
                 ImGui.CloseCurrentPopup();
@@ -699,12 +759,12 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.SameLine();
         if (ImGui.BeginChild("##modDetails", new Vector2(0, 0), true))
         {
-            var selected = discovered.Where(m => m.Directory == selectedModDirectory && !config.HiddenMods.Contains(m.Directory)).ToArray();
+            var selected = discovered.Where(m => m.Directory == selectedModDirectory && (!config.HiddenMods.Contains(m.Directory) || m.Directory == rightClickMod)).ToArray();
             if (selected.Length == 0) ImGui.TextDisabled(T("Выбери мод слева.", "Select a mod on the left."));
             else
             {
                 ImGui.TextUnformatted(selected[0].Name);
-                if (ImGui.SmallButton(T("Скрыть мод", "Hide mod"))) { config.HiddenMods.Add(selectedModDirectory); Save(); }
+                if (ImGui.SmallButton(T("Скрыть мод", "Hide mod"))) { rightClickMod = ""; config.HiddenMods.Add(selectedModDirectory); Save(); }
                 ImGui.SameLine();
                 ImGui.SetNextItemWidth(180);
                 var currentFolder = FolderFor(selectedModDirectory);
@@ -736,38 +796,54 @@ public sealed class Plugin : IDalamudPlugin
             expandedFolders.Add(folder);
             Save();
         }
+        var folderPayload = ImGui.AcceptDragDropPayload("ESHELF_FOLDER");
+        if (!folderPayload.IsNull && draggedFolder.Length > 0 && !FolderTree.Contains(draggedFolder, folder))
+        {
+            MoveFolder(draggedFolder, FolderTree.Join(folder, FolderTree.Name(draggedFolder)));
+            draggedFolder = "";
+        }
         ImGui.EndDragDropTarget();
     }
 
     private void SaveFolderEdit()
     {
         var name = newFolderName.Trim();
-        if (name.Length == 0 || config.Folders.Contains(name, StringComparer.OrdinalIgnoreCase)) return;
+        if (name.Length == 0 || name.Contains('/') || name.Contains('\\')) return;
+        name = FolderTree.Join(folderEditMode == 2 ? FolderTree.Parent(selectedFolderName) : createAtRoot ? "" : selectedFolderName, name);
+        if (config.Folders.Contains(name, StringComparer.OrdinalIgnoreCase)) return;
         if (folderEditMode == 2 && selectedFolderName.Length > 0)
         {
-            var index = config.Folders.FindIndex(f => f.Equals(selectedFolderName, StringComparison.OrdinalIgnoreCase));
-            if (index < 0) return;
-            config.Folders[index] = name;
-            foreach (var directory in config.ModFolders.Where(x => x.Value.Equals(selectedFolderName, StringComparison.OrdinalIgnoreCase))
-                .Select(x => x.Key).ToArray()) config.ModFolders[directory] = name;
-            expandedFolders.Remove(selectedFolderName);
+            MoveFolder(selectedFolderName, name);
         }
         else config.Folders.Add(name);
         selectedFolderName = name;
         expandedFolders.Add(name);
+        foreach (var parent in FolderTree.Ancestors(name)) { expandedFolders.Add(parent); collapsedFolders.Remove(parent); }
         newFolderName = "";
+        config.ClosedFolders = new(collapsedFolders, StringComparer.OrdinalIgnoreCase);
+        Save();
+    }
+
+    private void MoveFolder(string oldRoot, string newRoot)
+    {
+        if (FolderTree.Contains(oldRoot, newRoot) || config.Folders.Contains(newRoot, StringComparer.OrdinalIgnoreCase)) return;
+        config.Folders = config.Folders.Select(f => FolderTree.Rebase(f, oldRoot, newRoot)).ToList();
+        foreach (var key in config.ModFolders.Keys.ToArray())
+            config.ModFolders[key] = FolderTree.Rebase(config.ModFolders[key], oldRoot, newRoot);
+        var closed = collapsedFolders.Select(f => FolderTree.Rebase(f, oldRoot, newRoot)).ToArray();
+        collapsedFolders.Clear(); collapsedFolders.UnionWith(closed);
+        expandedFolders.Clear(); expandedFolders.UnionWith(config.Folders.Except(collapsedFolders));
+        foreach (var parent in FolderTree.Ancestors(newRoot)) { collapsedFolders.Remove(parent); expandedFolders.Add(parent); }
+        config.ClosedFolders = new(collapsedFolders, StringComparer.OrdinalIgnoreCase);
+        selectedFolderName = newRoot;
         Save();
     }
 
     private void DrawEmoteCard(EmoteMod mod)
     {
+        var visibleVariants = mod.Variants.Where(v => showAllVariants || VariantCompatible(v, mod)).ToArray();
         ImGui.PushID(mod.Command);
-        var variantKey = $"{mod.Directory}|{mod.Command}";
-        var expanded = expandedVariants.Contains(variantKey);
-        var poseHintHeight = IsPoseCommand(mod.Command)
-            ? mod.PoseIndex.HasValue ? 22 : 65 : 0;
-        var height = (mod.Variants.Length == 0 ? 88 : expanded ? 90 + mod.Variants.Length * 23 : 80) + poseHintHeight;
-        ImGui.BeginChild("##card", new Vector2(0, height), true);
+        ImGui.BeginGroup();
         var icon = Textures.GetFromGameIcon(new GameIconLookup(mod.Icon == 0 ? 19u : mod.Icon)).GetWrapOrDefault();
         if (icon is not null) ImGui.Image(icon.Handle, new Vector2(42));
         else ImGui.Dummy(new Vector2(42));
@@ -790,24 +866,100 @@ public sealed class Plugin : IDalamudPlugin
         if (IsPoseCommand(mod.Command)) DrawPoseSelector(mod);
         if (mod.Variants.Length > 0)
         {
-            if (ImGui.SmallButton($"{(expanded ? "▼" : "▶")} {T("Варианты мода", "Mod variants")} ({mod.Variants.Length})##variants"))
-            { if (expanded) expandedVariants.Remove(variantKey); else expandedVariants.Add(variantKey); }
-            if (expanded)
-                foreach (var (variant, index) in mod.Variants.Select((v, i) => (v, i)))
+            ImGui.Checkbox(T("Показать все варианты", "Show all variants"), ref showAllVariants);
+            if (!draftOptions.TryGetValue(mod.Directory, out var draft))
+            {
+                try { draft = CreateBookmark(mod, null).SavedOptions ?? []; draftOptions[mod.Directory] = draft; }
+                catch (Exception ex) { ImGui.TextWrapped(ex.Message); }
+            }
+            if (draft is not null)
+            {
+                foreach (var group in visibleVariants.GroupBy(v => v.Group))
                 {
-                    ImGui.PushID(index);
-                    ImGui.BeginDisabled(locked);
-                    if (ImGui.SmallButton(T("Предпросмотр", "Preview"))) Preview(mod, variant);
-                    ImGui.SameLine();
-                    if (ImGui.SmallButton(T("На панель", "Add to panel"))) AddBookmark(mod, variant);
-                    ImGui.EndDisabled();
-                    ImGui.SameLine();
-                    ImGui.TextUnformatted($"{variant.Group} → {variant.Option}");
+                    ImGui.PushID(group.Key);
+                    var choices = draft.GetValueOrDefault(group.Key, []);
+                    ImGui.TextUnformatted(group.Key);
+                    ImGui.SetNextItemWidth(Math.Max(160, ImGui.GetContentRegionAvail().X - 16));
+                    if (group.First().Multi)
+                    {
+                        foreach (var option in group)
+                        {
+                            var enabled = choices.Contains(option.Option);
+                            if (ImGui.Checkbox(option.Option, ref enabled))
+                            {
+                                var updated = choices.ToList();
+                                if (enabled) updated.Add(option.Option); else updated.Remove(option.Option);
+                                draft[group.Key] = updated;
+                            }
+                        }
+                    }
+                    else if (ImGui.BeginCombo("##choice", choices.FirstOrDefault() ?? "—"))
+                    {
+                        foreach (var option in group)
+                            if (ImGui.Selectable(option.Option, choices.Contains(option.Option)))
+                            {
+                                draft[group.Key] = [option.Option];
+                                foreach (var other in mod.Variants.Where(v => v.Group != group.Key && v.OffOption is not null && v.Paths.Intersect(option.Paths, StringComparer.OrdinalIgnoreCase).Any()))
+                                    draft[other.Group] = [other.OffOption!];
+                            }
+                        ImGui.EndCombo();
+                    }
                     ImGui.PopID();
                 }
+                ImGui.Spacing();
+                ImGui.BeginDisabled(locked);
+                if (ImGui.Button(T("Предпросмотр", "Preview"))) PlayDraft(mod, false);
+                ImGui.SameLine();
+                if (ImGui.Button(T("На панель", "Add to panel"))) PlayDraft(mod, true);
+                ImGui.EndDisabled();
+            }
         }
-        ImGui.EndChild();
+        ImGui.EndGroup();
+        ImGui.Separator();
         ImGui.PopID();
+    }
+
+    private void PlayDraft(EmoteMod mod, bool add)
+    {
+        try
+        {
+            var bookmark = CreateBookmark(mod, null);
+            bookmark.SavedOptions = draftOptions[mod.Directory].ToDictionary(x => x.Key, x => x.Value.ToList());
+            var active = mod.Variants.Where(v => bookmark.SavedOptions.TryGetValue(v.Group, out var values) && values.Contains(v.Option)).ToArray();
+            if (!showAllVariants && active.Any(v => !VariantCompatible(v, mod)))
+                throw new InvalidOperationException(T("Выбран вариант для другой модели. Выбери совместимый вариант или включи «Показать все».", "An option for another model is selected. Choose a compatible option or enable Show all."));
+            bookmark.Name = $"{mod.Name} — {mod.EmoteName} — " + string.Join("; ", active.Select(v => $"{v.Group}: {v.Option}"));
+            var pose = PoseSlot.FromPaths(active.SelectMany(v => v.Paths), mod.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? "j_" : "");
+            if (IsPoseCommand(mod.Command) && pose.HasValue) bookmark.PoseIndex = pose;
+            if (add) { config.Bookmarks.Add(bookmark); config.OverlayVisible = true; Save(); status = T("Добавлено на панель.", "Added to panel."); }
+            else Play(bookmark);
+        }
+        catch (Exception ex) { status = ex.Message; Log.Warning(ex, "Selected options failed"); }
+    }
+
+    private unsafe bool VariantCompatible(EmoteVariant variant, EmoteMod mod)
+    {
+        if (!papTableLoaded)
+        {
+            papTableLoaded = true;
+            try
+            {
+                var file = Data.GetFile<Lumina.Data.FileResource>("chara/xls/animation/papLoadTable.plt");
+                if (file is not null) papCompatibility = new(file.Data);
+            }
+            catch (Exception ex) { Log.Warning(ex, "PAP compatibility unavailable; retaining all variants"); }
+        }
+        if (papCompatibility is null || Objects.LocalPlayer is not { } player) return true;
+        var draw = (CharacterBase*)((Character*)player.Address)->GameObject.DrawObject;
+        if (draw == null || draw->GetObjectType() != ObjectType.CharacterBase || draw->GetModelType() != CharacterBase.ModelType.Human) return true;
+        var model = ((Human*)draw)->RaceSexId;
+        var paths = variant.Paths.Where(p => mod.Paths.Contains(p, StringComparer.OrdinalIgnoreCase)).ToArray();
+        return paths.Length == 0 || paths.Any(p =>
+        {
+            if (!compatibilityCache.TryGetValue((model, p), out var match))
+                compatibilityCache[(model, p)] = match = papCompatibility.Matches(p, model);
+            return match != false;
+        });
     }
 
     private void DrawEmoteTab()
@@ -1012,11 +1164,10 @@ public sealed class Plugin : IDalamudPlugin
         if (ImGui.SmallButton("Change pose##manual"))
         {
             pendingPoseIndex = -1;
-            poseStepAwaiting = false;
             ExecuteEmote("/cpose");
         }
         ImGui.EndDisabled();
-        if (ImGui.Checkbox(T("Автовыбор слота", "Automatic pose selection"), ref config.AutomaticPose)) Save();
+        ImGui.TextWrapped(T("Выбирай позу кнопкой Change pose. Автоматика — экспериментальная настройка.", "Select the pose with Change pose. Automation is an experimental setting."));
         if (mod.PoseIndex.HasValue)
         {
             var file = mod.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? "j_pose" : "pose";
@@ -1131,6 +1282,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private void DrawAdvancedTab()
     {
+        if (ImGui.Checkbox(T("Автовыбор позы (экспериментально, недостаточно протестировано)", "Automatic pose selection (experimental, not fully tested)"), ref config.AutomaticPose)) Save();
         var languages = new[] { ("ru", "Русский"), ("en", "English"), ("ja", "日本語"), ("de", "Deutsch"), ("fr", "Français") };
         var selectedLanguage = languages.FirstOrDefault(x => x.Item1 == config.Language).Item2 ?? "Русский";
         ImGui.SetNextItemWidth(180);

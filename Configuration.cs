@@ -18,7 +18,9 @@ public sealed class Configuration : IPluginConfiguration
     public float IconSize = 44;
     public float PanelOpacity = 0.85f;
     public bool English;
-    public bool AutomaticPose = true;
+    public bool AutomaticPose;
+    public bool ManualPoseMigration;
+    public HashSet<string> ClosedFolders = new(StringComparer.OrdinalIgnoreCase);
     public string Language = "";
 }
 

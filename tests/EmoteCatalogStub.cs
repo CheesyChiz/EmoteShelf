@@ -6,7 +6,8 @@ public sealed class EmoteCatalog
         => path.Contains("j_pose", StringComparison.OrdinalIgnoreCase)
             ? ("Sit on Ground", "/groundsit", 0)
             : path.Contains("pose", StringComparison.OrdinalIgnoreCase)
-                ? ("Standing pose", "/changepose", 0) : null;
+                ? ("Standing pose", "/changepose", 0)
+                : path.Contains("loop_emot19", StringComparison.OrdinalIgnoreCase) ? ("Hum", "/hum", 0) : null;
 
     public (string Name, string Command, uint Icon)? ResolveChangedItem(string item) => null;
     public bool IsKnownCommand(string command) => command is "/groundsit" or "/cpose" or "/changepose";

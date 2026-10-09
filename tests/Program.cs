@@ -41,8 +41,8 @@ try
     if (scanned.Count != 1 || scanned[0].Command != "/groundsit" || scanned[0].PoseIndex != 1 ||
         !scanned[0].PoseSlots.SequenceEqual([1]) || scanned[0].BasePaths.Length != 1)
         throw new Exception("Scanner did not map j_pose01 to ground-sit index 1.");
-    if (scanned[0].Variants.Length != 1 ||
-        !scanned[0].Variants[0].Files.TryGetValue(
+    if (scanned[0].Variants.Length != 2 ||
+        !scanned[0].Variants.Single(v => v.Option == "Ears ON").Files.TryGetValue(
             "chara/human/c0101/animation/a0001/bt_common/emote/j_pose01_loop.pap", out var optionFile) ||
         optionFile != @"squat a\ears on\j_pose01_loop.pap")
         throw new Exception("Scanner did not retain the selected option's exact local animation file.");
@@ -70,6 +70,19 @@ try
         new EmoteCatalog(), _ => []);
     if (multi.Count != 1 || multi[0].PoseIndex is not null || !multi[0].PoseSlots.SequenceEqual([1, 2]))
         throw new Exception("Scanner trusted an invalid description instead of the available pose files.");
+    var songRoot = Path.Combine(testRoot, "SongFixture");
+    Directory.CreateDirectory(songRoot);
+    File.WriteAllText(Path.Combine(songRoot, "meta.json"), """
+        {"DefaultData":{"Files":{"chara/human/c0101/animation/a0001/bt_common/emote/j_pose01_loop.pap":"base.pap"}},
+        "Groups":[{"Name":"Song","Type":"Single","Options":[
+        {"Name":"To Zanarkand","Files":{"sound/guitar.scd":"song1.scd"}},
+        {"Name":"Town","Files":{"sound/guitar.scd":"song2.scd"}},
+        {"Name":"None","Files":{"chara/human/c0101/animation/a0001/bt_common/emote/j_pose01_loop.pap":"silent.pap"}}]},
+        {"Name":"Music","Type":"Multi","Options":[{"Name":"On","Files":{"sound/music.scd":"music.scd"}}]}]}
+        """);
+    var song = ModScanner.Scan(testRoot, new Dictionary<string, string> { ["SongFixture"] = "SongFixture" }, new EmoteCatalog(), _ => []).Single();
+    if (song.BasePaths.Length != 1 || song.Variants.Count(v => v.Group == "Song") != 3 || !song.Variants.Single(v => v.Group == "Music").Multi)
+        throw new Exception("Song-only options, DefaultData or Multi group were lost.");
 }
 finally
 {
@@ -77,16 +90,6 @@ finally
         Directory.Exists(testRoot)) Directory.Delete(testRoot, recursive: true);
 }
 Console.WriteLine("Pose slot regression tests passed.");
-for (var highest = 0; highest <= 7; highest++)
-    for (var target = 0; target <= highest; target++)
-        if ((PoseSelection.Predecessor(target, highest) + 1) % (highest + 1) != target)
-            throw new Exception("Direct pose predecessor does not reach target.");
-foreach (var target in new[] { -1, 4 })
-{
-    try { PoseSelection.Predecessor(target, 3); throw new Exception("Invalid target accepted."); }
-    catch (ArgumentOutOfRangeException) { }
-}
-Console.WriteLine("Direct pose selection planning tests passed (runtime animation not simulated).");
 var ownershipRoot = Path.Combine(Path.GetTempPath(), "EmoteShelfOwnershipFixture");
 if (!ResolvedAnimation.BelongsToMod(ownershipRoot, Path.Combine(ownershipRoot, "lip sync", "dance.pap")) ||
     !ResolvedAnimation.BelongsToMod(ownershipRoot, Path.Combine(ownershipRoot, "animation", "dance.pap")) ||
@@ -96,3 +99,35 @@ if (!ResolvedAnimation.BelongsToMod(ownershipRoot, Path.Combine(ownershipRoot, "
     ResolvedAnimation.BelongsToMod(ownershipRoot, null))
     throw new Exception("Mod ownership checks rejected a same-mod override or accepted another mod.");
 Console.WriteLine("Same-mod lip-sync override and mod-boundary regression tests passed.");
+if (FolderTree.Parent("Dance/Pair/Favorites") != "Dance/Pair" || FolderTree.Name("Dance/Pair") != "Pair" ||
+    FolderTree.Rebase("Dance/Pair/Favorites", "Dance/Pair", "New") != "New/Favorites" ||
+    FolderTree.Contains("Dance", "Dancer") || !FolderTree.Contains("Dance", "Dance/Pair") ||
+    !FolderTree.Ancestors("Dance/Pair/Favorites").SequenceEqual(["Dance/Pair", "Dance"]))
+    throw new Exception("Nested folder path regression.");
+Console.WriteLine("Nested folder rename/move/ancestor tests passed.");
+var plt = new byte[512];
+void Half(int at, ushort value) => BitConverter.GetBytes(value).CopyTo(plt, at);
+void Word(int at, uint value) => BitConverter.GetBytes(value).CopyTo(plt, at);
+Half(0, 1); Half(2, 1); Word(8, 228); Word(12, 238);
+Word(16, 0); Word(20, 0); Word(24, 0);
+Word(28, 1401); Half(32, 1); Half(34, 0); plt[36] = 1;
+Word(196, 801); Half(200, 1); Half(202, 0);
+System.Text.Encoding.ASCII.GetBytes("bt_common\0").CopyTo(plt, 228);
+System.Text.Encoding.ASCII.GetBytes("emote/test_loop\0").CopyTo(plt, 238);
+var compatibility = new PapCompatibility(plt);
+if (compatibility.Matches("chara/human/c0801/animation/a0001/bt_common/emote/test_loop.pap", 1401) != true ||
+    compatibility.Matches("chara/human/c1401/animation/a0001/bt_common/emote/test_loop.pap", 1401) != false ||
+    compatibility.Matches("chara/human/c0801/animation/a0001/bt_common/emote/unknown.pap", 1401) is not null ||
+    new PapCompatibility([]).Matches("anything", 1401) is not null)
+    throw new Exception("PAP fallback filtering regression.");
+Console.WriteLine("PAP redirect and unknown-path filtering tests passed.");
+if (args.Length == 1)
+{
+    var realMod = Path.GetFullPath(args[0]);
+    var realName = Path.GetFileName(realMod);
+    var real = ModScanner.Scan(Path.GetDirectoryName(realMod)!, new Dictionary<string, string> { [realName] = realName }, new EmoteCatalog(), _ => []);
+    var guitar = real.Single(m => m.Command == "/hum");
+    if (guitar.BasePaths.Length == 0 || !guitar.Variants.Where(v => v.Group == "Song").Select(v => v.Option).Order().SequenceEqual(new[] { "None", "To Zanarkand", "Town" }.Order()))
+        throw new Exception("Installed Guitar Solo songs were not indexed correctly.");
+    Console.WriteLine("Read-only installed Guitar Solo check passed: To Zanarkand, Town, None; base animation retained.");
+}
