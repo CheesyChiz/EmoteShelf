@@ -36,6 +36,8 @@ public sealed class EmoteCatalog
     public bool? IsUnlocked(string command, IUnlockState unlocks)
         => commands.TryGetValue(command, out var emote) ? unlocks.IsEmoteUnlocked(emote) : null;
 
+    public bool IsKnownCommand(string command) => commands.ContainsKey(command);
+
     public (string Name, string Command, uint Icon)? Resolve(string gamePath)
     {
         var file = Path.GetFileNameWithoutExtension(gamePath).ToLowerInvariant();

@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 
 namespace EmoteShelf;
 
-public sealed record EmoteVariant(string Group, string Option, string[] Paths);
+public sealed record EmoteVariant(string Group, string Option, string[] Paths, string? OffOption);
 public sealed record EmoteMod(string Directory, string Name, string EmoteName, string Command, uint Icon, string[] Paths,
     EmoteVariant[] Variants, int? PoseIndex);
 
@@ -67,7 +67,7 @@ public static partial class ModScanner
             catch { /* Some Penumbra versions may not expose changed items. */ }
             if (byCommand.Count == 0)
             {
-                var inferred = InferCommands(description);
+                var inferred = InferCommands(description).Where(catalog.IsKnownCommand);
                 foreach (var command in inferred) byCommand[command] = (command, 0, [.. paths]);
             }
             if (byCommand.Count == 0) byCommand[""] = ("Unknown emote", 0, [.. paths]);
@@ -77,8 +77,7 @@ public static partial class ModScanner
                     .DistinctBy(v => (v.Group, v.Option)).ToArray();
                 result.Add(new EmoteMod(directory, displayName, entry.Name, command, entry.Icon,
                     [.. entry.Paths.Order(StringComparer.OrdinalIgnoreCase)], relevant,
-                    command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) &&
-                    Regex.IsMatch(description, @"\bsit\s*2\b", RegexOptions.IgnoreCase) ? 1 : null));
+                    command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? InferGroundSitPose(description, entry.Paths) : null));
             }
         }
         return [.. result.OrderBy(m => m.EmoteName, StringComparer.OrdinalIgnoreCase).ThenBy(m => m.Name, StringComparer.OrdinalIgnoreCase)];
@@ -123,6 +122,11 @@ public static partial class ModScanner
             !group.TryGetProperty("Options", out var options) || options.ValueKind != JsonValueKind.Array) return;
         var groupName = group.TryGetProperty("Name", out var n) ? n.GetString() ?? "" : "";
         if (groupName.Length == 0) return;
+        var offOption = options.EnumerateArray()
+            .Select(o => o.TryGetProperty("Name", out var name) ? name.GetString() : null)
+            .FirstOrDefault(name => name is not null && (name.Contains("[ x ]", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("None", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("Off", StringComparison.OrdinalIgnoreCase)));
         foreach (var option in options.EnumerateArray())
         {
             if (option.ValueKind != JsonValueKind.Object) continue;
@@ -130,8 +134,17 @@ public static partial class ModScanner
             if (optionName.Length == 0) continue;
             var optionPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             Collect(option, optionPaths);
-            if (optionPaths.Count > 0) variants.Add(new EmoteVariant(groupName, optionName, [.. optionPaths]));
+            if (optionPaths.Count > 0) variants.Add(new EmoteVariant(groupName, optionName, [.. optionPaths], offOption));
         }
+    }
+
+    private static int? InferGroundSitPose(string description, IEnumerable<string> paths)
+    {
+        var fromDescription = Regex.Match(description, @"(?:/cpose\s*|\bsit\s*)([1-9])", RegexOptions.IgnoreCase);
+        if (fromDescription.Success) return int.Parse(fromDescription.Groups[1].Value) - 1;
+        var poses = paths.Select(p => Regex.Match(Path.GetFileName(p), @"j_pose0?([1-9])", RegexOptions.IgnoreCase))
+            .Where(m => m.Success).Select(m => int.Parse(m.Groups[1].Value)).Distinct().ToArray();
+        return poses.Length == 1 ? poses[0] - 1 : null;
     }
 
     public static List<string> InferCommands(string description)

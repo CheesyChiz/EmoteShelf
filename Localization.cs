@@ -18,6 +18,33 @@ internal static class Localization
         ["Preview"] = ("プレビュー", "Vorschau", "Aperçu"),
         ["Add to panel"] = ("パネルに追加", "Zur Leiste hinzufügen", "Ajouter au panneau"),
         ["Mod variants"] = ("MODのバリエーション", "Mod-Varianten", "Variantes du mod"),
+        ["Unrecognized mods"] = ("未識別のMOD", "Nicht erkannte Mods", "Mods non reconnus"),
+        ["Select a mod on the left, then preview and add its emote on the right. Bookmarks save automatically."] =
+            ("左でMODを選び、右でエモートをプレビューして追加します。登録内容は自動保存されます。",
+             "Links einen Mod auswählen, rechts die Emote testen und hinzufügen. Lesezeichen werden automatisch gespeichert.",
+             "Choisissez un mod à gauche, puis testez et ajoutez son emote à droite. Les raccourcis sont enregistrés automatiquement."),
+        ["New folder"] = ("新しいフォルダー", "Neuer Ordner", "Nouveau dossier"),
+        ["Create folder"] = ("フォルダーを作成", "Ordner erstellen", "Créer un dossier"),
+        ["Rename folder"] = ("フォルダー名を変更", "Ordner umbenennen", "Renommer le dossier"),
+        ["Delete folder"] = ("フォルダーを削除", "Ordner löschen", "Supprimer le dossier"),
+        ["Folder name"] = ("フォルダー名", "Ordnername", "Nom du dossier"),
+        ["Unfiled"] = ("未分類", "Ohne Ordner", "Sans dossier"),
+        ["Save"] = ("保存", "Speichern", "Enregistrer"),
+        ["Select a mod on the left."] = ("左でMODを選んでください。", "Links einen Mod auswählen.", "Choisissez un mod à gauche."),
+        ["Mods will remain in the catalog, unfiled."] = ("MODは未分類として一覧に残ります。", "Mods bleiben ohne Ordner im Katalog.", "Les mods resteront dans le catalogue, sans dossier."),
+        ["These mods contain animation files, but no reliable game emote was identified. Many affect combat or idle animations and need no action here. /cpose3 is not a game command."] =
+            ("これらのMODはアニメーションファイルを含みますが、対応するゲーム内エモートは特定できません。戦闘や待機アニメーションを変えるものも多く、ここでの操作は不要です。/cpose3 はゲーム内コマンドではありません。",
+             "Diese Mods enthalten Animationsdateien, aber keine eindeutig erkannte Spiel-Emote. Viele ändern Kampf- oder Leerlaufanimationen und brauchen hier keine Aktion. /cpose3 ist kein Spielbefehl.",
+             "Ces mods contiennent des animations sans emote du jeu identifiable. Beaucoup modifient le combat ou les poses d'attente et ne nécessitent aucune action ici. /cpose3 n'est pas une commande du jeu."),
+        ["This mod replaces /groundsit pose {0}."] = ("このMODは /groundsit のポーズ {0} を置き換えます。", "Dieser Mod ersetzt /groundsit-Pose {0}.", "Ce mod remplace la pose {0} de /groundsit."),
+        ["Auto does not switch pose. Poses 1–4 are /groundsit slots, not mod variants."] =
+            ("自動ではポーズを切り替えません。ポーズ1～4は /groundsit の枠であり、MODのバリエーションではありません。",
+             "Automatisch wechselt die Pose nicht. Posen 1–4 sind /groundsit-Plätze, keine Mod-Varianten.",
+             "Auto ne change pas la pose. Les poses 1 à 4 sont des emplacements /groundsit, pas des variantes du mod."),
+        ["Drag to reorder"] = ("ドラッグして並べ替え", "Zum Sortieren ziehen", "Glisser pour réorganiser"),
+        ["Character is still sitting; stand up and try again."] = ("まだ座っています。立ち上がってから再試行してください。", "Der Charakter sitzt noch. Bitte aufstehen und erneut versuchen.", "Le personnage est encore assis. Levez-vous puis réessayez."),
+        ["Penumbra did not confirm the saved mod options; emote was not played."] =
+            ("Penumbraが保存済みMOD設定を確認できなかったため、再生しませんでした。", "Penumbra hat die gespeicherten Mod-Optionen nicht bestätigt; die Emote wurde nicht abgespielt.", "Penumbra n'a pas confirmé les options enregistrées ; l'emote n'a pas été lancée."),
         ["Added to panel. Arrange it on the Panel tab."] =
             ("パネルに追加しました。配置は「パネル」タブで変更できます。",
              "Zur Leiste hinzugefügt. Anordnung im Reiter „Leiste“ ändern.",
@@ -107,9 +134,9 @@ internal static class Localization
 
     private static string Help(string language, string fallback) => language switch
     {
-        "ja" => "1. 「エモート」で目的の動きを探し、プレビューで確認します。「パネルに追加」は選んだMODの設定を個別に保存します。/groundsit のポーズは必要に応じて指定できます。\n\n2. アイコンをクリックして再生し、Ctrl+Shift+クリックで削除します。パネルの配置は「パネル」で変更し、非表示のMODは「設定」で戻せます。\n\n3. MODの選択はPenumbraで一時的に行われます。「設定」で解除できます。認識されない組み合わせはPenumbraで設定してから新しいアイコンを追加してください。",
-        "de" => "1. Unter „Emotes“ die gewünschte Bewegung suchen und mit „Vorschau“ testen. „Zur Leiste hinzufügen“ speichert die gewählte Mod-Variante als eigenes Symbol. Für /groundsit kann eine Zielpose gewählt werden.\n\n2. Symbol anklicken zum Abspielen, Strg+Umschalt+Klick zum Entfernen. Die Leiste unter „Leiste“ anpassen; ausgeblendete Mods unter „Einstellungen“ wiederherstellen.\n\n3. Die Mod-Auswahl in Penumbra ist vorübergehend und kann unter „Einstellungen“ zurückgesetzt werden. Nicht erkannte Kombinationen zuerst in Penumbra einstellen und dann als neues Symbol hinzufügen.",
-        "fr" => "1. Dans Emotes, trouvez l'animation voulue et testez-la avec Aperçu. Ajouter au panneau enregistre cette variante du mod séparément. Pour /groundsit, vous pouvez choisir une pose cible.\n\n2. Cliquez sur une icône pour jouer ; Ctrl+Maj+clic la retire. Réglez le panneau dans Panneau et restaurez les mods masqués dans Paramètres.\n\n3. La sélection du mod dans Penumbra est temporaire et peut être effacée dans Paramètres. Pour une combinaison non détectée, configurez-la dans Penumbra puis ajoutez un nouveau raccourci.",
+        "ja" => "1. 「エモート」の左側でMODを選び、右側でバリエーションをプレビューしてパネルに追加します。リスト下のボタンでローカルフォルダーを作成・変更・削除できます。MODはフォルダーにドラッグできます。\n\n2. アイコンをクリックして再生、Ctrl+Shift+クリックで削除します。ドラッグで並べ替えられます。パネル設定は「パネル」タブにあります。\n\n3. PenumbraのMOD選択は一時的で、「設定」から解除できます。/groundsit のポーズは可能ならMODファイルから検出します。未識別のアニメーションMODは必ずしも再生可能なエモートではありません。",
+        "de" => "1. Unter „Emotes“ links einen Mod wählen, rechts Varianten testen und zur Leiste hinzufügen. Die Schaltflächen unter der Liste erstellen, benennen und löschen lokale Ordner. Mods lassen sich auf Ordner ziehen.\n\n2. Symbol anklicken zum Abspielen, Strg+Umschalt+Klick zum Entfernen. Symbole per Drag-and-drop sortieren. Die Leiste im Reiter „Leiste“ anpassen.\n\n3. Die Penumbra-Mod-Auswahl ist vorübergehend und kann unter „Einstellungen“ zurückgesetzt werden. /groundsit-Posen werden nach Möglichkeit aus Mod-Dateien erkannt. Nicht erkannte Animationsmods sind nicht unbedingt spielbare Emotes.",
+        "fr" => "1. Dans Emotes, choisissez un mod à gauche, puis testez ses variantes à droite avant de les ajouter au panneau. Les boutons sous la liste créent, renomment et suppriment des dossiers locaux. Glissez les mods dans un dossier.\n\n2. Cliquez sur une icône pour jouer ; Ctrl+Maj+clic pour la retirer. Glissez les icônes pour les réorganiser. Réglez le panneau dans Panneau.\n\n3. La sélection du mod Penumbra est temporaire et peut être effacée dans Paramètres. La pose /groundsit est détectée depuis les fichiers si possible. Un mod d'animation non reconnu n'est pas forcément une emote jouable.",
         _ => fallback,
     };
 }
