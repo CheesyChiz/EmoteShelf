@@ -11,6 +11,7 @@ public sealed record EmoteMod(string Directory, string Name, string EmoteName, s
     EmoteVariant[] Variants, int? PoseIndex)
 {
     public int[] PoseSlots { get; init; } = [];
+    public string[] BasePaths { get; init; } = [];
 }
 
 public static partial class ModScanner
@@ -30,6 +31,7 @@ public static partial class ModScanner
             if (!modRoot.StartsWith(Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
                     StringComparison.OrdinalIgnoreCase)) continue;
             var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var basePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var variants = new List<EmoteVariant>();
             string description = "";
             foreach (var file in new[] { "meta.json", "default_mod.json" }.Concat(
@@ -42,6 +44,9 @@ public static partial class ModScanner
                     using var doc = JsonDocument.Parse(File.ReadAllText(full));
                     if (Path.GetFileName(full).Equals("meta.json", StringComparison.OrdinalIgnoreCase)
                         && doc.RootElement.TryGetProperty("Description", out var d)) description = d.GetString() ?? "";
+                    if (Path.GetFileName(full).Equals("meta.json", StringComparison.OrdinalIgnoreCase) ||
+                        Path.GetFileName(full).Equals("default_mod.json", StringComparison.OrdinalIgnoreCase))
+                        CollectDirectFiles(doc.RootElement, basePaths);
                     Collect(doc.RootElement, paths);
                     CollectVariants(doc.RootElement, variants);
                 }
@@ -94,7 +99,8 @@ public static partial class ModScanner
                     [.. entry.Paths.Order(StringComparer.OrdinalIgnoreCase)], relevant,
                     command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? InferGroundSitPose(description, entry.Paths)
                         : IsStandingPoseCommand(command) ? idlePose : null)
-                    { PoseSlots = poseSlots });
+                    { PoseSlots = poseSlots,
+                      BasePaths = [.. basePaths.Where(p => entry.Paths.Contains(p, StringComparer.OrdinalIgnoreCase))] });
             }
         }
         return [.. result.OrderBy(m => m.EmoteName, StringComparer.OrdinalIgnoreCase).ThenBy(m => m.Name, StringComparer.OrdinalIgnoreCase)];
@@ -119,6 +125,20 @@ public static partial class ModScanner
         }
         else if (element.ValueKind == JsonValueKind.Array)
             foreach (var child in element.EnumerateArray()) Collect(child, paths);
+    }
+
+    private static void CollectDirectFiles(JsonElement root, HashSet<string> paths)
+    {
+        if (root.ValueKind != JsonValueKind.Object) return;
+        foreach (var key in new[] { "Files", "FileSwaps" })
+        {
+            if (!root.TryGetProperty(key, out var files) || files.ValueKind != JsonValueKind.Object) continue;
+            foreach (var file in files.EnumerateObject())
+            {
+                var path = file.Name.Replace('\\', '/').ToLowerInvariant();
+                if (path.Contains("/emote/") && path.EndsWith(".pap")) paths.Add(path);
+            }
+        }
     }
 
     private static void CollectVariants(JsonElement root, List<EmoteVariant> variants)

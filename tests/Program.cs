@@ -33,10 +33,13 @@ try
           }]
         }
         """);
+    File.WriteAllText(Path.Combine(modRoot, "default_mod.json"), """
+        {"Files": {"chara/human/c0101/animation/a0001/bt_common/emote/j_pose01_loop.pap": "default.pap"}}
+        """);
     var scanned = ModScanner.Scan(testRoot, new Dictionary<string, string> { ["GroundSitFixture"] = "GroundSitFixture" },
         new EmoteCatalog(), _ => []);
     if (scanned.Count != 1 || scanned[0].Command != "/groundsit" || scanned[0].PoseIndex != 1 ||
-        !scanned[0].PoseSlots.SequenceEqual([1]))
+        !scanned[0].PoseSlots.SequenceEqual([1]) || scanned[0].BasePaths.Length != 1)
         throw new Exception("Scanner did not map j_pose01 to ground-sit index 1.");
     if (scanned[0].Variants.Length != 1 ||
         !scanned[0].Variants[0].Files.TryGetValue(

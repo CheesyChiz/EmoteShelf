@@ -248,9 +248,7 @@ public sealed class Plugin : IDalamudPlugin
             pendingCollection = collection.Id;
             pendingPriority = priority;
             pendingOptions = selectedOptions.ToDictionary(x => x.Key, x => x.Value.ToArray(), StringComparer.OrdinalIgnoreCase);
-            var variantPaths = selected.Variants.SelectMany(v => v.Paths)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var basePaths = selected.Paths.Where(path => !variantPaths.Contains(path));
+            var basePaths = selected.Variants.Length == 0 ? selected.Paths : selected.BasePaths;
             var activeVariantPaths = selected.Variants.Where(v => selectedOptions.TryGetValue(v.Group, out var enabled) &&
                     enabled.Contains(v.Option, StringComparer.OrdinalIgnoreCase))
                 .SelectMany(v => v.Paths);
