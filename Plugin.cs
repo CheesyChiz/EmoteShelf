@@ -568,7 +568,6 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         if (settingsOpen) DrawSettings();
         if (config.OverlayVisible) DrawOverlay();
-        DrawPairWindow();
         DrawLinkNotice();
     }
 

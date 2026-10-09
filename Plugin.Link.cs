@@ -14,6 +14,7 @@ public sealed partial class Plugin
     private bool linkPreview, linkPositionApplied;
     private string linkNotice = "", lastLinkState = "", lastLinkPartner = "", handledInvitation = "";
     private long linkNoticeUntil;
+    private long pairNoticeUntil;
     private static string LinkIdentity(IPlayerCharacter player) => PairRules.Identity(player.Name.TextValue, player.HomeWorld.RowId, 0, 0);
     private IPlayerCharacter? LinkActor(string identity) => Objects.OfType<IPlayerCharacter>().FirstOrDefault(p => LinkIdentity(p) == identity);
     private bool LinkFresh => link is not null && Environment.TickCount64 - link.Snapshot.ReceivedAt < 4000;
@@ -32,7 +33,7 @@ public sealed partial class Plugin
         if (link is not null && link.Identity != LinkIdentity(local)) StopLink();
         link ??= new LinkClient(LinkIdentity(local));
         var s = link.Snapshot;
-        if (s.Error.Length > 0) { linkNotice = s.Error; linkNoticeUntil = Environment.TickCount64 + 5000; }
+        if (s.Error.Length > 0 && linkNotice != s.Error) { linkNotice = s.Error; linkNoticeUntil = Environment.TickCount64 + 5000; }
         if (s.State != lastLinkState || s.Partner != lastLinkPartner)
         {
             if (s.State == "linked") linkNotice = T("Партнёр подключён. Shift+иконка отправляет предложение анимации с выбором роли.", "Partner connected. Shift+icon sends an animation proposal with role selection.");
@@ -73,6 +74,7 @@ public sealed partial class Plugin
         if (link?.Snapshot.State is "linked" or "incoming" or "outgoing")
             if (ImGui.Button(T("Разорвать связь / отменить приглашение", "Disconnect / cancel invitation"))) { CancelPair(); link.Act("disconnect"); }
         if (link?.Snapshot.State == "error" && ImGui.Button(T("Переподключиться", "Reconnect"))) StopLink();
+        if (link?.Snapshot.Error.Length > 0) ImGui.TextWrapped(link.Snapshot.Error);
         if (ImGui.Checkbox(T("Настроить положение уведомления", "Preview / position notification"), ref linkPreview)) linkPositionApplied = false;
         ImGui.SameLine();
         if (ImGui.Button(T("Сбросить положение", "Reset position"))) { config.PairNoticeX = config.PairNoticeY = -1; linkPositionApplied = false; linkPreview = true; Save(); }
@@ -83,7 +85,8 @@ public sealed partial class Plugin
         var invite = LinkFresh && s?.State == "incoming";
         var outgoing = LinkFresh && s?.State == "outgoing";
         var launch = LinkFresh && s?.Launch is { Status: "waiting" };
-        if (!linkPreview && !invite && !outgoing && !launch && Environment.TickCount64 >= linkNoticeUntil) { linkPositionApplied = false; return; }
+        if (!PairRules.ShowPairHud(config.PairEnabled, LinkFresh, s?.State, linkPreview)) { linkPositionApplied = false; return; }
+        var interactive = invite || outgoing || launch || pairSession is not null;
         var viewport = ImGui.GetMainViewport();
         if (!linkPositionApplied)
         {
@@ -92,7 +95,11 @@ public sealed partial class Plugin
             ImGui.SetNextWindowPos(position, ImGuiCond.Always); linkPositionApplied = true;
         }
         ImGui.SetNextWindowSize(new Vector2(420, 0), ImGuiCond.Always);
-        if (ImGui.Begin(T("Emote Shelf — приглашение", "Emote Shelf — invitation") + "###EmoteShelfLinkNotice", ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings))
+        var flags = ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoSavedSettings | ImGuiWindowFlags.NoFocusOnAppearing;
+        if (!linkPreview) flags |= ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoMove;
+        if (!interactive && !linkPreview) flags |= ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoInputs;
+        ImGui.SetNextWindowBgAlpha(.8f);
+        if (ImGui.Begin(T("Emote Shelf — положение статуса", "Emote Shelf — status position") + "###EmoteShelfLinkNotice", flags))
         {
             var pos = ImGui.GetWindowPos() - viewport.WorkPos;
             if (!ImGui.IsMouseDown(ImGuiMouseButton.Left) && (Math.Abs(config.PairNoticeX-pos.X) > 1 || Math.Abs(config.PairNoticeY-pos.Y) > 1))
@@ -113,7 +120,21 @@ public sealed partial class Plugin
                 }
                 else if (ImGui.Button(T("Отменить", "Cancel"))) link!.Act("disconnect");
             }
-            else ImGui.TextWrapped(linkPreview ? T("Перетащи окно за заголовок. Положение сохранится после отпускания мыши.", "Drag this window by its title. Position is saved when you release the mouse.") : linkNotice);
+            else
+            {
+                var name = LinkedPartner?.Name.TextValue ?? T("партнёр не рядом", "partner not nearby");
+                ImGui.TextColored(new Vector4(.65f, 1f, .8f, 1), T("● В паре: ", "● Linked: ") + name);
+                if (linkPreview) ImGui.TextWrapped(T("Перетащи за заголовок. Положение сохранится после отпускания мыши.", "Drag by the title. Position is saved when you release the mouse."));
+                else if (pairSession is not null || Environment.TickCount64 < pairNoticeUntil)
+                {
+                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1f, .85f, .55f, 1));
+                    ImGui.TextWrapped(pairMessage);
+                    ImGui.PopStyleColor();
+                }
+                else if (Environment.TickCount64 < linkNoticeUntil && linkNotice.Length > 0) ImGui.TextWrapped(linkNotice);
+                if (pairSession is not null && ImGui.Button(T("Отменить запуск", "Cancel launch"))) CancelPair(T("Запуск отменён.", "Launch cancelled."));
+                if (pairSession is not null && pairCollectionWarning.Length > 0) ImGui.TextWrapped(pairCollectionWarning);
+            }
             if (linkPreview && ImGui.Button(T("Закрыть предпросмотр", "Close preview"))) linkPreview = false;
         }
         ImGui.End();

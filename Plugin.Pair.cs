@@ -19,7 +19,7 @@ public sealed partial class Plugin
     private Bookmark? pairBookmark;
     private ulong pairTargetId;
     private string pairSelf = "", pairOther = "", pairHeldCommand = "", pairMessage = "", pairTargetName = "";
-    private bool pairPreparing, pairStartedPreparation, pairAlignStarted, pairPopup;
+    private bool pairPreparing, pairStartedPreparation, pairAlignStarted;
     private Vector3 pairOrigin, pairTargetOrigin;
     private float pairFacing;
     private float pairTargetFacing;
@@ -87,7 +87,6 @@ public sealed partial class Plugin
     private void BeginPairCore(Bookmark bookmark, string offerId)
     {
         CancelPair();
-        pairPopup = true;
         pairCollectionWarning = "";
         try
         {
@@ -140,7 +139,7 @@ public sealed partial class Plugin
     private void BeginPair(EmoteMod mod)
     {
         try { BeginPair(CreateBookmark(mod, null)); }
-        catch (Exception ex) { pairPopup = true; CancelPair(ex.Message); }
+        catch (Exception ex) { CancelPair(ex.Message); }
     }
 
     private void CancelPair(string? reason = null)
@@ -164,7 +163,7 @@ public sealed partial class Plugin
         pairPreparing = pairStartedPreparation = pairAlignStarted = false;
         pairReadySent = false;
         pairStableFrames = 0;
-        if (reason is not null) { pairMessage = reason; status = reason; }
+        if (reason is not null) { pairMessage = reason; status = reason; pairNoticeUntil = Environment.TickCount64 + 8000; }
     }
 
     private void UpdatePair()
@@ -257,6 +256,7 @@ public sealed partial class Plugin
             ClearPendingValidation();
             pairMessage = T("Команды запущены по общему таймеру. Совпадение фазы sit/idle пока не гарантируется.", "Commands launched on the shared timer. Matching sit/idle phase is not guaranteed yet.");
             status = pairMessage;
+            pairNoticeUntil = Environment.TickCount64 + 5000;
         }
         catch (Exception ex) { CancelPair(ex.Message); Log.Warning(ex, "Pair launch cancelled"); }
     }
@@ -313,27 +313,4 @@ public sealed partial class Plugin
             "Lightless transfers mods/appearance, not our relay. We check that it handles the partner, but its API does not confirm that this animation finished downloading."));
     }
 
-    private void DrawPairWindow()
-    {
-        if (!pairPopup) return;
-        ImGui.SetNextWindowSize(new Vector2(440, 0), ImGuiCond.FirstUseEver);
-        if (ImGui.Begin(T("Запуск в паре", "Pair launch") + "##pair", ref pairPopup, ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoCollapse))
-        {
-            ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + 420);
-            ImGui.TextUnformatted(pairTargetName);
-            ImGui.TextWrapped(pairMessage);
-            ImGui.TextWrapped(T("Дождитесь синхронизации в Lightless. Наличие партнёра в API не подтверждает загрузку новой анимации.",
-                "Wait for Lightless synchronization. An actor in its API does not confirm new animation assets have loaded."));
-            if (pairCollectionWarning.Length > 0)
-            {
-                ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(1, .75f, .35f, 1));
-                ImGui.TextWrapped(pairCollectionWarning);
-                ImGui.PopStyleColor();
-            }
-            if (pairSession is not null && ImGui.Button(T("Отменить", "Cancel"))) CancelPair(T("Запуск отменён.", "Launch cancelled."));
-            ImGui.PopTextWrapPos();
-        }
-        ImGui.End();
-        if (!pairPopup) CancelPair();
-    }
 }

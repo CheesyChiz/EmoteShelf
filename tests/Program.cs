@@ -137,6 +137,10 @@ if (PairRules.AngleDistance(MathF.PI - .01f, -MathF.PI + .01f) > .021f ||
     !float.IsPositiveInfinity(PairRules.AngleDistance(float.NaN, 0)))
     throw new Exception("Pair heading wrap/invalid-angle regression");
 Console.WriteLine("Pair heading wraparound and invalid-angle tests passed.");
+if (PairRules.ShowPairHud(true, true, "error", false) || PairRules.ShowPairHud(true, false, "linked", false) ||
+    PairRules.ShowPairHud(false, true, "linked", false) || !PairRules.ShowPairHud(true, true, "incoming", false) ||
+    !PairRules.ShowPairHud(true, true, "linked", false) || !PairRules.ShowPairHud(false, false, null, true))
+    throw new Exception("Pair HUD connection/preview visibility regression");
 if (!PairRules.Aligned(System.Numerics.Vector3.Zero, 0, new(.005f, 0, 0), .005f) ||
     PairRules.Aligned(System.Numerics.Vector3.Zero, 0, new(.02f, 0, 0), 0) ||
     PairRules.Aligned(System.Numerics.Vector3.Zero, 0, System.Numerics.Vector3.Zero, .02f) ||

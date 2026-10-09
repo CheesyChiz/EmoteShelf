@@ -6,6 +6,8 @@ namespace EmoteShelf;
 
 public static class PairRules
 {
+    public static bool ShowPairHud(bool enabled, bool fresh, string? state, bool preview)
+        => preview || (enabled && fresh && state is "linked" or "incoming" or "outgoing");
     public static bool Aligned(Vector3 a, float yawA, Vector3 b, float yawB)
         => Vector3.Distance(a, b) <= .01f && AngleDistance(yawA, yawB) <= .01f;
     public static float AngleDistance(float a, float b)
