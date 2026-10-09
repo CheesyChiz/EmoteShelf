@@ -3,8 +3,10 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../PoseSlot.cs" Link="PoseSlot.cs" />
+    <Compile Include="../ModScanner.cs" Link="ModScanner.cs" />
   </ItemGroup>
 </Project>

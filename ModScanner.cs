@@ -3,7 +3,10 @@ using System.Text.RegularExpressions;
 
 namespace EmoteShelf;
 
-public sealed record EmoteVariant(string Group, string Option, string[] Paths, string? OffOption);
+public sealed record EmoteVariant(string Group, string Option, string[] Paths, string? OffOption)
+{
+    public Dictionary<string, string> Files { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+}
 public sealed record EmoteMod(string Directory, string Name, string EmoteName, string Command, uint Icon, string[] Paths,
     EmoteVariant[] Variants, int? PoseIndex)
 {
@@ -86,11 +89,11 @@ public static partial class ModScanner
                     .DistinctBy(v => (v.Group, v.Option)).ToArray();
                 var poseSlots = command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase)
                     ? PoseSlot.AllFromPaths(entry.Paths, "j_")
-                    : command.Equals("/cpose", StringComparison.OrdinalIgnoreCase) ? idleSlots : [];
+                    : IsStandingPoseCommand(command) ? idleSlots : [];
                 result.Add(new EmoteMod(directory, displayName, entry.Name, command, entry.Icon,
                     [.. entry.Paths.Order(StringComparer.OrdinalIgnoreCase)], relevant,
                     command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? InferGroundSitPose(description, entry.Paths)
-                        : command.Equals("/cpose", StringComparison.OrdinalIgnoreCase) ? idlePose : null)
+                        : IsStandingPoseCommand(command) ? idlePose : null)
                     { PoseSlots = poseSlots });
             }
         }
@@ -148,17 +151,29 @@ public static partial class ModScanner
             if (optionName.Length == 0) continue;
             var optionPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             Collect(option, optionPaths);
-            if (optionPaths.Count > 0) variants.Add(new EmoteVariant(groupName, optionName, [.. optionPaths], offOption));
+            if (optionPaths.Count > 0)
+            {
+                var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                if (option.TryGetProperty("Files", out var filesJson) && filesJson.ValueKind == JsonValueKind.Object)
+                    foreach (var file in filesJson.EnumerateObject())
+                        if (file.Value.ValueKind == JsonValueKind.String &&
+                            optionPaths.Contains(file.Name.Replace('\\', '/')))
+                            files[file.Name.Replace('\\', '/').ToLowerInvariant()] = file.Value.GetString() ?? "";
+                variants.Add(new EmoteVariant(groupName, optionName, [.. optionPaths], offOption)
+                    { Files = files });
+            }
         }
     }
 
     private static int? InferGroundSitPose(string description, IEnumerable<string> paths)
     {
         // pose00 is the default stance; j_pose01 is the first /cpose step (index 1).
-        var pose = PoseSlot.FromPaths(paths, "j_");
-        if (pose.HasValue) return pose;
+        var slots = PoseSlot.AllFromPaths(paths, "j_");
+        if (slots.Length == 1) return slots[0];
         var fromDescription = Regex.Match(description, @"/cpose\s*([1-9])", RegexOptions.IgnoreCase);
-        return fromDescription.Success ? int.Parse(fromDescription.Groups[1].Value) : null;
+        if (!fromDescription.Success) return null;
+        var declared = int.Parse(fromDescription.Groups[1].Value);
+        return slots.Length == 0 || slots.Contains(declared) ? declared : null;
     }
 
     private static int? InferIdlePose(string description, IEnumerable<string> paths)
@@ -173,6 +188,10 @@ public static partial class ModScanner
         }
         return slots.Length == 1 ? slots[0] : null;
     }
+
+    private static bool IsStandingPoseCommand(string command)
+        => command.Equals("/cpose", StringComparison.OrdinalIgnoreCase) ||
+           command.Equals("/changepose", StringComparison.OrdinalIgnoreCase);
 
     public static List<string> InferCommands(string description)
     {
