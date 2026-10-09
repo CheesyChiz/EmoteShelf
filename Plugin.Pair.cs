@@ -144,6 +144,7 @@ public sealed partial class Plugin
 
     private void CancelPair(string? reason = null)
     {
+        if (pairSession is not null) LogPairDiagnostics(reason ?? "Local cancellation");
         pairUntargetedPlayback = false;
         if (pairOfferId.Length > 0) link?.Act("cancel_launch", invitation: pairOfferId);
         pairOfferId = "";
@@ -164,6 +165,20 @@ public sealed partial class Plugin
         pairReadySent = false;
         pairStableFrames = 0;
         if (reason is not null) { pairMessage = reason; status = reason; pairNoticeUntil = Environment.TickCount64 + 8000; }
+    }
+
+    private void LogPairDiagnostics(string outcome)
+    {
+        var now = Environment.TickCount64;
+        var snapshot = pairSession?.Snapshot;
+        var local = Objects.LocalPlayer;
+        var peer = LinkedPartner;
+        var geometry = local is not null && peer is not null
+            ? FormattableString.Invariant($"distance={Vector3.Distance(local.Position, peer.Position):F5} angleRad={PairRules.AngleDistance(local.Rotation, peer.Rotation):F5} localCanPair={CanPair(local)} peerCanPair={CanPair(peer)}")
+            : "actor unavailable";
+        // The proposal identifier is not a bearer credential. Its short prefix correlates both clients.
+        var attempt = pairOfferId.Length >= 8 ? pairOfferId[..8] : "none";
+        Log.Information($"Pair diagnostic v{typeof(Plugin).Assembly.GetName().Version} attempt={attempt} outcome={outcome}; state={snapshot?.State} anchor={snapshot?.Anchor} ageMs={now - (snapshot?.ReceivedAt ?? now)} alignStarted={pairAlignStarted} preparationStarted={pairStartedPreparation} preparing={pairPreparing} ready={pairReadySent} stable={pairStableFrames}; {geometry}; correction={(pairAlignStarted ? pairAlignment?.Diagnostics : "not started")}");
     }
 
     private void UpdatePair()
@@ -246,6 +261,7 @@ public sealed partial class Plugin
             if (snapshot.Align) ApplyPairFacing(pairFacing);
             pairUntargetedPlayback = true;
             DispatchPreparedCommand(pairHeldCommand);
+            LogPairDiagnostics("Dispatched");
             pairSession.Complete();
             link?.Act("finish_launch", invitation: pairOfferId);
             pairOfferId = "";

@@ -19,6 +19,19 @@ internal sealed unsafe class PairAlignment : IDisposable
     private float bestDistance;
     private bool correcting;
     private int correctionFrames, stableFrames;
+    private readonly List<string> samples = [];
+    private long started;
+    public string Diagnostics => string.Join(" | ", samples);
+
+    // Bounded, relative-only samples: no actor names, world coordinates or network tokens.
+    private void Sample(string phase)
+    {
+        if (samples.Count >= 32) return;
+        if (objects.LocalPlayer is not { } player) { samples.Add(phase + ": no actor"); return; }
+        var delta = destination - player.Position;
+        var mode = ((Character*)player.Address)->Mode;
+        samples.Add(FormattableString.Invariant($"{Environment.TickCount64 - started}ms {phase} frame={correctionFrames} stable={stableFrames} delta=({delta.X:F5},{delta.Y:F5},{delta.Z:F5}) distance={delta.Length():F5} angleRad={PairRules.AngleDistance(player.Rotation, facing):F5} mode={mode}"));
+    }
     public bool Active { get; private set; }
     public bool Arrived { get; private set; }
     public string Error { get; private set; } = "";
@@ -44,9 +57,12 @@ internal sealed unsafe class PairAlignment : IDisposable
         Active = true;
         correcting = false;
         correctionFrames = stableFrames = 0;
+        started = Environment.TickCount64;
+        samples.Clear();
+        Sample("begin");
     }
 
-    public void Cancel() { Active = false; Arrived = false; correcting = false; }
+    public void Cancel() { if (Active) Sample("cancel"); Active = false; Arrived = false; correcting = false; }
 
     // Once per framework frame, not per input-hook invocation. Require observed
     // stability on subsequent frames; a position write itself is not confirmation.
@@ -56,13 +72,15 @@ internal sealed unsafe class PairAlignment : IDisposable
         if (objects.LocalPlayer is not { } player || Environment.TickCount64 >= expires)
         { Fail("Alignment confirmation timed out."); return; }
         var character = (Character*)player.Address;
+        Sample("before");
         if (character->Mode != CharacterModes.Normal || Vector3.Distance(player.Position, destination) > .05f)
         { Fail("Fine alignment cancelled: character moved or changed state."); return; }
         stableFrames = PairRules.Aligned(player.Position, player.Rotation, destination, facing) ? stableFrames + 1 : 0;
-        if (stableFrames >= 3) { Active = false; Arrived = true; return; }
+        if (stableFrames >= 3) { Sample("arrived"); Active = false; Arrived = true; return; }
         if (++correctionFrames > 12) { Fail("Position/facing did not stabilize; pair launch cancelled."); return; }
         character->GameObject.SetPosition(destination.X, destination.Y, destination.Z);
         character->GameObject.SetRotation(facing);
+        Sample("after");
     }
 
     private void Fail(string reason) { Cancel(); Error = reason; }
@@ -71,7 +89,11 @@ internal sealed unsafe class PairAlignment : IDisposable
     {
         hook.Original(context, lateral, forward, turn, mode, extra, additive);
         if (!Active) return;
-        if (*lateral != 0 || *forward != 0 || *turn != 0) { Fail("Alignment cancelled by movement input."); return; }
+        if (*lateral != 0 || *forward != 0 || *turn != 0)
+        {
+            if (samples.Count < 32) samples.Add(FormattableString.Invariant($"input lateral={*lateral:F5} forward={*forward:F5} turn={*turn:F5} additive={additive}"));
+            Fail("Alignment cancelled by movement input."); return;
+        }
         if (additive != 0) return;
         if (correcting) return;
         var now = Environment.TickCount64;
@@ -87,6 +109,7 @@ internal sealed unsafe class PairAlignment : IDisposable
             if (Vector3.Distance(player.Position, destination) > .05f)
             { Fail("Too much height difference for fine alignment."); return; }
             correcting = true;
+            Sample("fine-start");
             return;
         }
         if (distance < bestDistance - .01f) { bestDistance = distance; lastProgress = now; }
