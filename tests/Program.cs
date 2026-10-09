@@ -77,3 +77,22 @@ finally
         Directory.Exists(testRoot)) Directory.Delete(testRoot, recursive: true);
 }
 Console.WriteLine("Pose slot regression tests passed.");
+for (var highest = 0; highest <= 7; highest++)
+    for (var target = 0; target <= highest; target++)
+        if ((PoseSelection.Predecessor(target, highest) + 1) % (highest + 1) != target)
+            throw new Exception("Direct pose predecessor does not reach target.");
+foreach (var target in new[] { -1, 4 })
+{
+    try { PoseSelection.Predecessor(target, 3); throw new Exception("Invalid target accepted."); }
+    catch (ArgumentOutOfRangeException) { }
+}
+Console.WriteLine("Direct pose selection planning tests passed (runtime animation not simulated).");
+var ownershipRoot = Path.Combine(Path.GetTempPath(), "EmoteShelfOwnershipFixture");
+if (!ResolvedAnimation.BelongsToMod(ownershipRoot, Path.Combine(ownershipRoot, "lip sync", "dance.pap")) ||
+    !ResolvedAnimation.BelongsToMod(ownershipRoot, Path.Combine(ownershipRoot, "animation", "dance.pap")) ||
+    ResolvedAnimation.BelongsToMod(ownershipRoot, Path.Combine(ownershipRoot + "OtherMod", "dance.pap")) ||
+    ResolvedAnimation.BelongsToMod(ownershipRoot, Path.Combine(ownershipRoot, "..", "other.pap")) ||
+    ResolvedAnimation.BelongsToMod(ownershipRoot, "chara/human/emote/dance.pap") ||
+    ResolvedAnimation.BelongsToMod(ownershipRoot, null))
+    throw new Exception("Mod ownership checks rejected a same-mod override or accepted another mod.");
+Console.WriteLine("Same-mod lip-sync override and mod-boundary regression tests passed.");

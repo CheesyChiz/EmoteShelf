@@ -7,6 +7,7 @@ using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.System.String;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.Game.Control;
+using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using Penumbra.Api.Enums;
 using Penumbra.Api.IpcSubscribers;
@@ -57,7 +58,6 @@ public sealed class Plugin : IDalamudPlugin
     private long poseReadyDeadline;
     private int poseAttempts;
     private bool poseStepAwaiting;
-    private int poseBeforeStep;
     private long poseStepDeadline;
     private bool initialScanPending = true;
     private string pendingModDirectory = "";
@@ -270,11 +270,9 @@ public sealed class Plugin : IDalamudPlugin
                             StringComparison.OrdinalIgnoreCase))
                         throw new InvalidOperationException(T("Файл варианта выходит за пределы папки мода.",
                             "A variant file points outside its mod directory."));
-                    if (pendingExpectedFiles.TryGetValue(gamePath, out var previous) &&
-                        !previous.Equals(absoluteFile, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidOperationException(string.Format(T(
-                            "Несколько активных опций этого мода заменяют {0}. Выключи конфликтующие группы.",
-                            "Multiple active options in this mod replace {0}. Disable the conflicting groups."), gamePath));
+                    // Penumbra resolves overlapping groups by their own priorities.
+                    // The catalog does not model Multi/Combining groups, so it cannot
+                    // predict the final file (e.g. a lip-sync override).
                     pendingExpectedFiles[gamePath] = absoluteFile;
                 }
             }
@@ -351,17 +349,13 @@ public sealed class Plugin : IDalamudPlugin
                 foreach (var gamePath in pendingExpectedPaths)
                 {
                     var ecPath = resolvePath.Invoke(pendingCollection, gamePath, out var effectivePath);
-                    if (ecPath != PenumbraApiEc.Success || string.IsNullOrWhiteSpace(effectivePath) ||
-                        !Path.GetFullPath(effectivePath).StartsWith(pendingExpectedModRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
-                            StringComparison.OrdinalIgnoreCase))
+                    if (ecPath != PenumbraApiEc.Success || !ResolvedAnimation.BelongsToMod(pendingExpectedModRoot, effectivePath))
                         throw new InvalidOperationException(string.Format(T(
                             "Penumbra отдаёт для {0} файл не из выбранного мода: {1}",
                             "Penumbra resolves {0} outside the selected mod: {1}"), gamePath, effectivePath));
                     if (pendingExpectedFiles.TryGetValue(gamePath, out var expectedFile) &&
                         !Path.GetFullPath(effectivePath).Equals(expectedFile, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidOperationException(string.Format(T(
-                            "Penumbra отдаёт для {0} другой вариант файла: {1}",
-                            "Penumbra resolves {0} to a different variant file: {1}"), gamePath, effectivePath));
+                        Log.Debug("Same-mod option override for {GamePath}: {EffectivePath}", gamePath, effectivePath);
                 }
                 if (!(IsStandingPoseCommand(command) && pendingPoseIndex >= 0))
                     ExecuteEmote(command);
@@ -380,6 +374,7 @@ public sealed class Plugin : IDalamudPlugin
             finally { pendingModDirectory = ""; pendingOptions = null; pendingExpectedPaths = []; pendingExpectedFiles.Clear(); pendingExpectedModRoot = ""; }
         }
         if (pendingPoseIndex < 0 || pendingCommand.Length > 0 || Environment.TickCount64 < poseAt) return;
+          if (!config.AutomaticPose) { pendingPoseIndex = -1; return; }
         try
         {
             var currentPose = CurrentPoseIndex(pendingPoseType);
@@ -399,7 +394,7 @@ public sealed class Plugin : IDalamudPlugin
             }
             if (poseStepAwaiting)
             {
-                if (currentPose == poseBeforeStep)
+                  if (currentPose != pendingPoseIndex)
                 {
                     if (Environment.TickCount64 >= poseStepDeadline)
                     {
@@ -407,6 +402,7 @@ public sealed class Plugin : IDalamudPlugin
                         poseStepAwaiting = false;
                         status = T("Игра не подтвердила шаг /cpose; остановлено, чтобы не проскочить нужную позу.",
                             "The game did not confirm the /cpose step; stopped to avoid overshooting the target pose.");
+                          Log.Warning("Pose selection was not confirmed: {State}", PoseDiagnostics());
                     }
                     return;
                 }
@@ -420,20 +416,20 @@ public sealed class Plugin : IDalamudPlugin
                 pendingPoseIndex = -1;
                 return;
             }
-            if (currentPose == pendingPoseIndex)
+              if (currentPose == pendingPoseIndex && poseAttempts > 0)
             {
-                status = string.Format(T("Поза {0} выбрана.", "Pose {0} selected."), currentPose + 1);
+                  status = string.Format(T("Игра сообщает слот {0:00}.", "Game reports slot {0:00}."), currentPose);
+                  Log.Information("Pose confirmed: {State}", PoseDiagnostics());
                 pendingPoseIndex = -1;
                 return;
             }
-            if (poseAttempts++ >= 8)
+              if (poseAttempts++ >= 1)
             {
                 pendingPoseIndex = -1;
                 status = T("Не удалось переключить нужную позу. Попробуй /cpose вручную.", "Could not reach the target pose. Try /cpose manually.");
                 return;
             }
-            ExecuteEmote("/cpose");
-            poseBeforeStep = currentPose;
+              SelectPoseDirect(pendingPoseType, pendingPoseIndex);
             poseStepAwaiting = true;
             poseStepDeadline = Environment.TickCount64 + 2500;
             status = string.Format(T("Переключаю позу {0} → {1} (шаг {2}).", "Changing pose {0} → {1} (step {2})."),
@@ -449,16 +445,35 @@ public sealed class Plugin : IDalamudPlugin
         if (player is null) return -1;
         var character = (Character*)player.Address;
         var controller = &character->EmoteController;
-        if (poseType == EmoteController.PoseType.GroundSit)
+          if (poseType == EmoteController.PoseType.GroundSit)
         {
-            return IsGroundSitting() && controller->CurrentPoseType == poseType
+              return IsGroundSitting() && controller->GetPoseKind() == (int)poseType
                 ? controller->CPoseState : -1;
         }
         // A previous looping emote can leave an idle pose number cached in the
         // controller even though the character is not actually standing idle.
-        return character->Mode == CharacterModes.Normal && controller->EmoteId == 0 &&
-               controller->CurrentPoseType == poseType
+          return character->Mode == CharacterModes.Normal &&
+                 controller->GetPoseKind() == (int)poseType
             ? controller->CPoseState : -1;
+    }
+
+    private unsafe void SelectPoseDirect(EmoteController.PoseType type, int target)
+    {
+        if (CurrentPoseIndex(type) < 0) throw new InvalidOperationException("Pose context changed before /cpose.");
+        var state = PlayerState.Instance();
+        if (state == null) throw new InvalidOperationException("Player state is unavailable.");
+        var previous = state->SelectedPoses[(int)type];
+        var predecessor = PoseSelection.Predecessor(target, EmoteController.GetAvailablePoses(type));
+        Log.Information("Pose request {Type} target={Target}: {State}", type, target, PoseDiagnostics());
+        // SecretTweaks ChangePoseDirect uses this technique: stage the preference,
+        // then let the normal game command advance it. Do not write actor state.
+        state->SelectedPoses[(int)type] = predecessor;
+        try { ExecuteEmote("/cpose"); }
+        finally
+        {
+            if (state->SelectedPoses[(int)type] == predecessor)
+                state->SelectedPoses[(int)type] = previous;
+        }
     }
 
     private unsafe bool IsGroundSitting()
@@ -873,7 +888,7 @@ public sealed class Plugin : IDalamudPlugin
                         var variantKey = $"{mod.Directory}|{mod.Command}";
                         var expanded = expandedVariants.Contains(variantKey);
                         var poseHintHeight = IsPoseCommand(mod.Command)
-                            ? mod.PoseIndex.HasValue ? 22 : 65 : 0;
+                            ? mod.PoseIndex.HasValue ? 94 : 137 : 0;
                         ImGui.BeginChild("##card", new Vector2(0, (mod.Variants.Length == 0 ? 88 : expanded ? 90 + mod.Variants.Length * 23 : 80) + poseHintHeight), true);
                         var icon = Textures.GetFromGameIcon(new GameIconLookup(mod.Icon == 0 ? 19u : mod.Icon)).GetWrapOrDefault();
                         if (icon is not null) ImGui.Image(icon.Handle, new Vector2(42));
@@ -988,6 +1003,20 @@ public sealed class Plugin : IDalamudPlugin
 
     private void DrawPoseSelector(EmoteMod mod)
     {
+        var type = mod.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase)
+            ? EmoteController.PoseType.GroundSit : EmoteController.PoseType.Idle;
+        var current = CurrentPoseIndex(type);
+        var target = GetPoseIndex(mod);
+        ImGui.TextDisabled($"{T("Текущий слот", "Current slot")}: {(current < 0 ? "—" : current.ToString("00"))} / {T("нужен", "target")}: {(target < 0 ? "—" : target.ToString("00"))}");
+        ImGui.BeginDisabled(current < 0 || pendingCommand.Length > 0 || waitingForStand is not null);
+        if (ImGui.SmallButton("Change pose##manual"))
+        {
+            pendingPoseIndex = -1;
+            poseStepAwaiting = false;
+            ExecuteEmote("/cpose");
+        }
+        ImGui.EndDisabled();
+        if (ImGui.Checkbox(T("Автовыбор слота", "Automatic pose selection"), ref config.AutomaticPose)) Save();
         if (mod.PoseIndex.HasValue)
         {
             var file = mod.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? "j_pose" : "pose";

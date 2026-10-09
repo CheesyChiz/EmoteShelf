@@ -7,6 +7,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../PoseSlot.cs" Link="PoseSlot.cs" />
+    <Compile Include="../PoseSelection.cs" Link="PoseSelection.cs" />
+    <Compile Include="../ResolvedAnimation.cs" Link="ResolvedAnimation.cs" />
     <Compile Include="../ModScanner.cs" Link="ModScanner.cs" />
   </ItemGroup>
 </Project>
