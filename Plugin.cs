@@ -7,6 +7,7 @@ using Dalamud.Plugin.Services;
 using FFXIVClientStructs.FFXIV.Client.System.String;
 using FFXIVClientStructs.FFXIV.Client.Game.Character;
 using FFXIVClientStructs.FFXIV.Client.Game.Control;
+using FFXIVClientStructs.FFXIV.Client.Game.UI;
 using FFXIVClientStructs.FFXIV.Client.UI;
 using Penumbra.Api.Enums;
 using Penumbra.Api.IpcSubscribers;
@@ -57,9 +58,8 @@ public sealed class Plugin : IDalamudPlugin
     private Guid pendingCollection;
     private int pendingPriority;
     private Dictionary<string, string[]>? pendingOptions;
-    private bool pendingStand;
+    private Bookmark? waitingForStand;
     private long standDeadline;
-    private long standRetryAt;
     private readonly HashSet<string> expandedVariants = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> expandedMods = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> collapsedMods = new(StringComparer.OrdinalIgnoreCase);
@@ -123,6 +123,13 @@ public sealed class Plugin : IDalamudPlugin
                 if (bookmark.IconId == 0 && match.Icon != 0) { bookmark.IconId = match.Icon; changedBookmarks = true; }
                 if (match.PoseIndex.HasValue && bookmark.PoseIndex != match.PoseIndex)
                 { bookmark.PoseIndex = match.PoseIndex; changedBookmarks = true; }
+                var oldVariant = match.Variants.FirstOrDefault(v =>
+                    bookmark.Name.Equals($"{match.EmoteName} — {v.Option}", StringComparison.Ordinal));
+                if (oldVariant is not null)
+                {
+                    bookmark.Name = $"{match.Name} — {match.EmoteName} — {oldVariant.Option}";
+                    changedBookmarks = true;
+                }
             }
             if (changedBookmarks) Save();
             status = string.Format(T("В списке {0} сочетаний мод–эмоция.", "Showing {0} mod–emote pairs."),
@@ -138,6 +145,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private void Play(Bookmark bookmark)
     {
+        waitingForStand = null;
         pendingCommand = "";
         pendingModDirectory = "";
         pendingPoseIndex = -1;
@@ -151,13 +159,13 @@ public sealed class Plugin : IDalamudPlugin
         if (selected is null) { status = T("Мод не найден в Penumbra; обнови список.", "Mod not found in Penumbra; refresh the list."); return; }
         try
         {
-            pendingStand = CurrentPoseIndex(EmoteController.PoseType.GroundSit) >= 0 &&
-                !bookmark.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase);
-            if (pendingStand)
+            if (CurrentPoseIndex(EmoteController.PoseType.GroundSit) >= 0)
             {
                 StandUpFromGroundSit();
+                waitingForStand = bookmark;
                 standDeadline = Environment.TickCount64 + 4000;
-                standRetryAt = Environment.TickCount64 + 700;
+                status = T("Выхожу из /groundsit перед переключением мода…", "Standing up before switching mods…");
+                return;
             }
             var (valid, _, collection) = getCollection.Invoke(player.ObjectIndex);
             if (!valid || collection.Id == Guid.Empty) throw new InvalidOperationException(T("Не удалось определить коллекцию персонажа.", "Could not determine the character's collection."));
@@ -199,7 +207,7 @@ public sealed class Plugin : IDalamudPlugin
             pendingCollection = collection.Id;
             pendingPriority = priority;
             pendingOptions = selectedOptions.ToDictionary(x => x.Key, x => x.Value.ToArray(), StringComparer.OrdinalIgnoreCase);
-            sendAt = Environment.TickCount64 + 750;
+            sendAt = Environment.TickCount64 + 500;
             pendingPoseIndex = bookmark.PoseIndex ?? GetPoseIndex(selected);
             pendingPoseType = bookmark.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase)
                 ? EmoteController.PoseType.GroundSit : EmoteController.PoseType.Idle;
@@ -211,7 +219,6 @@ public sealed class Plugin : IDalamudPlugin
             pendingCommand = "";
             pendingModDirectory = "";
             pendingOptions = null;
-            pendingStand = false;
             try { if (activeCollection != Guid.Empty) removeTemporary.Invoke(activeCollection, TemporaryKey); } catch { /* Penumbra unavailable */ }
             status = ex.Message;
             Log.Warning(ex, "Emote Shelf switching failed");
@@ -225,28 +232,22 @@ public sealed class Plugin : IDalamudPlugin
             initialScanPending = false;
             Scan();
         }
+        if (waitingForStand is { } bookmark)
+        {
+            if (CurrentPoseIndex(EmoteController.PoseType.GroundSit) < 0)
+            {
+                waitingForStand = null;
+                Play(bookmark);
+            }
+            else if (Environment.TickCount64 >= standDeadline)
+            {
+                waitingForStand = null;
+                status = T("Не удалось встать из /groundsit.", "Could not stand up from /groundsit.") + " " + PoseDiagnostics();
+            }
+            return;
+        }
         if (pendingCommand.Length > 0 && Environment.TickCount64 >= sendAt)
         {
-            if (pendingStand && CurrentPoseIndex() >= 0)
-            {
-                if (Environment.TickCount64 >= standDeadline)
-                {
-                    pendingCommand = "";
-                    pendingPoseIndex = -1;
-                    pendingStand = false;
-                    status = T("Персонаж всё ещё сидит; встань и попробуй снова.",
-                        "Character is still sitting; stand up and try again.");
-                    return;
-                }
-                if (Environment.TickCount64 >= standRetryAt)
-                {
-                    StandUpFromGroundSit();
-                    standRetryAt = Environment.TickCount64 + 700;
-                }
-                sendAt = Environment.TickCount64 + 100;
-                return;
-            }
-            pendingStand = false;
             var command = pendingCommand;
             pendingCommand = "";
             try
@@ -261,15 +262,12 @@ public sealed class Plugin : IDalamudPlugin
                         expected.Value.Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase)))
                     throw new InvalidOperationException(T("Penumbra не подтвердила вариант настроек мода; эмоция не запущена.",
                         "Penumbra did not confirm the saved mod options; emote was not played."));
-                // Repeating /groundsit while already seated toggles it off instead of refreshing the pose.
-                if ((!command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ||
-                    CurrentPoseIndex(EmoteController.PoseType.GroundSit) < 0) &&
-                    !(command.Equals("/cpose", StringComparison.OrdinalIgnoreCase) && pendingPoseIndex >= 0))
+                if (!(command.Equals("/cpose", StringComparison.OrdinalIgnoreCase) && pendingPoseIndex >= 0))
                     ExecuteEmote(command);
                 if (pendingPoseIndex >= 0)
                 {
                     poseAt = Environment.TickCount64 + 100;
-                    poseReadyDeadline = Environment.TickCount64 + 3500;
+                    poseReadyDeadline = Environment.TickCount64 + 5000;
                 }
             }
             catch (Exception ex)
@@ -292,11 +290,17 @@ public sealed class Plugin : IDalamudPlugin
                     status = pendingPoseType == EmoteController.PoseType.GroundSit
                         ? T("Не удалось войти в /groundsit до смены позы.", "Could not enter /groundsit before changing pose.")
                         : T("Не удалось перейти в стоячую позу до /cpose.", "Could not enter a standing idle pose before /cpose.");
+                    status += " " + PoseDiagnostics();
                 }
                 else poseAt = Environment.TickCount64 + 200;
                 return;
             }
-            if (currentPose == pendingPoseIndex) { pendingPoseIndex = -1; return; }
+            if (currentPose == pendingPoseIndex)
+            {
+                status = string.Format(T("Поза {0} выбрана.", "Pose {0} selected."), currentPose + 1);
+                pendingPoseIndex = -1;
+                return;
+            }
             if (poseAttempts++ >= 8)
             {
                 pendingPoseIndex = -1;
@@ -304,6 +308,8 @@ public sealed class Plugin : IDalamudPlugin
                 return;
             }
             ExecuteEmote("/cpose");
+            status = string.Format(T("Переключаю позу {0} → {1} (шаг {2}).", "Changing pose {0} → {1} (step {2})."),
+                currentPose + 1, pendingPoseIndex + 1, poseAttempts);
             poseAt = Environment.TickCount64 + 500;
         }
         catch (Exception ex) { pendingPoseIndex = -1; status = ex.Message; Log.Warning(ex, "Pose switch failed"); }
@@ -313,25 +319,31 @@ public sealed class Plugin : IDalamudPlugin
     {
         var player = Objects.LocalPlayer;
         if (player is null) return -1;
-        var controller = &((Character*)player.Address)->EmoteController;
+        var character = (Character*)player.Address;
+        var controller = &character->EmoteController;
+        if (poseType == EmoteController.PoseType.GroundSit)
+        {
+            if (character->Mode is not (CharacterModes.EmoteLoop or CharacterModes.InPositionLoop) ||
+                character->ModeParam != 1) return -1;
+            if (controller->CurrentPoseType == poseType) return controller->CPoseState;
+            var state = PlayerState.Instance();
+            return state is null ? controller->CPoseState : state->CurrentPose(poseType);
+        }
         return controller->CurrentPoseType == poseType ? controller->CPoseState : -1;
+    }
+
+    private unsafe string PoseDiagnostics()
+    {
+        var player = Objects.LocalPlayer;
+        if (player is null) return "(no character)";
+        var character = (Character*)player.Address;
+        return $"(mode={(byte)character->Mode}/{character->ModeParam}, poseType={(byte)character->EmoteController.CurrentPoseType}, pose={character->EmoteController.CPoseState})";
     }
 
     private unsafe void StandUpFromGroundSit()
     {
-        // Target Forward is the same client action used by DeterministicPose's /standup.
-        // Clearing the target prevents this action from selecting or interacting with it.
-        var previousTarget = Targets.Target;
-        try
-        {
-            Targets.Target = null;
-            var ui = UIModule.Instance();
-            if (ui == null) return;
-            var command = Utf8String.FromString("/action \"target forward\"");
-            try { ui->ProcessChatBoxEntry(command); }
-            finally { command->Dtor(true); }
-        }
-        finally { Targets.Target = previousTarget; }
+        // /groundsit is a game toggle: while seated it exits the stance.
+        ExecuteEmote("/groundsit");
     }
 
     private int GetPoseIndex(EmoteMod mod)
@@ -814,7 +826,7 @@ public sealed class Plugin : IDalamudPlugin
         }
         var targetPose = variant is not null && mod.PoseIndex.HasValue ? mod.PoseIndex.Value : GetPoseIndex(mod);
         return new Bookmark { ModDirectory = mod.Directory,
-            Name = variant is null ? $"{mod.EmoteName} — {mod.Name}" : $"{mod.EmoteName} — {variant.Option}",
+            Name = variant is null ? $"{mod.EmoteName} — {mod.Name}" : $"{mod.Name} — {mod.EmoteName} — {variant.Option}",
             Command = mod.Command, IconId = mod.Icon, SavedOptions = saved,
             PoseIndex = targetPose >= 0 ? targetPose : null };
     }
