@@ -22,6 +22,8 @@ public sealed partial class Plugin
     private bool pairPreparing, pairStartedPreparation, pairAlignStarted, pairPopup;
     private Vector3 pairOrigin, pairTargetOrigin;
     private float pairFacing;
+    private float pairTargetFacing;
+    private bool pairUntargetedPlayback;
     private long pairDeadline;
     private string pairCollectionWarning = "";
     private long lightlessCheckAt;
@@ -121,6 +123,7 @@ public sealed partial class Plugin
             pairOrigin = local.Position;
             pairFacing = local.Rotation;
             pairTargetOrigin = target.Position;
+            pairTargetFacing = target.Rotation;
             pairDeadline = Environment.TickCount64 + 60000;
             pairOfferId = offerId;
             pairOfferSeen = false;
@@ -139,6 +142,7 @@ public sealed partial class Plugin
 
     private void CancelPair(string? reason = null)
     {
+        pairUntargetedPlayback = false;
         if (pairOfferId.Length > 0) link?.Act("cancel_launch", invitation: pairOfferId);
         pairOfferId = "";
         if (pairSession is not null)
@@ -169,7 +173,7 @@ public sealed partial class Plugin
             if (Objects.LocalPlayer is not { } local || LinkedPartner is not { } target ||
                 target.GameObjectId != pairTargetId ||
                 PairIdentity(local) != pairSelf || PairIdentity(target) != pairOther)
-                throw new InvalidOperationException(T("Пара отменена: таргет, персонаж или зона изменились.", "Pair cancelled: target, character or zone changed."));
+                throw new InvalidOperationException(T("Пара отменена: подключённый партнёр не найден рядом, сменился персонаж или зона. Таргет не требуется.", "Pair cancelled: linked partner is not visible, or character/world/zone changed. A target is not required."));
             if (!LightlessHandles(target.Address)) throw new InvalidOperationException(T("Lightless больше не обрабатывает партнёра; запуск отменён.", "Lightless no longer handles the partner; launch cancelled."));
             if (!CanPair(local) || (!CanPair(target) && !PairRules.PeerMayHaveStarted(snapshot.State, snapshot.StartAt, now)) ||
                 target.IsDead || !PairRules.Nearby(local.Position, target.Position))
@@ -186,24 +190,24 @@ public sealed partial class Plugin
             if (pairAlignment?.Error.Length > 0 && pairAlignStarted) throw new InvalidOperationException(pairAlignment.Error);
             var mayApproach = snapshot.Align && !snapshot.Anchor && pairAlignStarted && !pairStartedPreparation;
             if (!mayApproach && (Vector3.Distance(local.Position, pairOrigin) > .08f ||
-                    MathF.Abs(MathF.IEEERemainder(local.Rotation - pairFacing, MathF.Tau)) > .08f))
+                    PairRules.AngleDistance(local.Rotation, pairFacing) > .08f))
                 throw new InvalidOperationException(T("Пара отменена: ты начал двигаться или поворачиваться.", "Pair cancelled: you moved or turned."));
             if (snapshot.State is "connecting" or "waiting") return;
             if (snapshot.Align && !snapshot.Anchor && !pairStartedPreparation)
             {
-                if (Vector3.Distance(target.Position, pairTargetOrigin) > .08f)
+                if (Vector3.Distance(target.Position, pairTargetOrigin) > .08f || PairRules.AngleDistance(target.Rotation, pairTargetFacing) > .08f)
                     throw new InvalidOperationException(T("Партнёр сдвинулся; повторите выравнивание.", "Your partner moved; retry alignment."));
                 if (!pairAlignStarted)
                 {
                     pairAlignment ??= new PairAlignment(Interop, Objects);
-                    pairAlignment.Begin(target.Position, target.Rotation);
+                    pairAlignment.Begin(pairTargetOrigin, pairTargetFacing);
                     pairAlignStarted = true;
                     pairMessage = T("Подхожу к партнёру. Любое ручное движение отменит запуск.", "Approaching partner. Movement input cancels the launch.");
                     return;
                 }
                 if (!pairAlignment!.Arrived) return;
                 pairOrigin = local.Position;
-                pairFacing = local.Rotation;
+                pairFacing = pairTargetFacing;
             }
             if (!pairStartedPreparation)
             {
@@ -225,6 +229,8 @@ public sealed partial class Plugin
             if (now - snapshot.StartAt > 250 || now - snapshot.ReceivedAt > 650)
                 throw new InvalidOperationException(T("Пропущено время старта или потеряна связь. Повторите запуск.", "Start was missed or connection lost. Please retry."));
             ValidatePairSelection();
+            if (snapshot.Align) ApplyPairFacing(pairFacing);
+            pairUntargetedPlayback = true;
             DispatchPreparedCommand(pairHeldCommand);
             pairSession.Complete();
             link?.Act("finish_launch", invitation: pairOfferId);
@@ -250,6 +256,30 @@ public sealed partial class Plugin
         foreach (var path in pendingExpectedPaths)
             if (resolvePath.Invoke(pendingCollection, path, out var effective) != PenumbraApiEc.Success || !ResolvedAnimation.BelongsToMod(pendingExpectedModRoot, effective))
                 throw new InvalidOperationException("Prepared animation was replaced; pair cancelled.");
+    }
+
+    private unsafe void ApplyPairFacing(float rotation)
+    {
+        if (!float.IsFinite(rotation) || Objects.LocalPlayer is not { } local)
+            throw new InvalidOperationException("Pair facing unavailable.");
+        ((Character*)local.Address)->GameObject.SetRotation(rotation);
+    }
+
+    private unsafe void ExecutePairEmote(string command)
+    {
+        var id = catalog?.IdFor(command) ?? 0;
+        if (id == 0 || id > ushort.MaxValue || catalog?.IsUnlocked(command == "/cpose" ? "/changepose" : command, Unlocks) != true)
+            throw new InvalidOperationException(T("Эмоция недоступна для запуска без цели.", "Emote unavailable for untargeted pair playback."));
+        var manager = FFXIVClientStructs.FFXIV.Client.Game.Control.EmoteManager.Instance();
+        var table = FFXIVClientStructs.FFXIV.Client.Game.Control.EmoteController.PlayEmoteOption.StaticVirtualTablePointer;
+        if (manager == null || table == null || !manager->CanExecuteEmote((ushort)id))
+            throw new InvalidOperationException(T("Игра пока не разрешает эту эмоцию. Повторите запуск стоя и без другой эмоции.", "The game cannot execute this emote yet. Retry standing without another emote."));
+        // Explicit no-target option, including a valid vtable. Do not clear/change
+        // the user's target, global auto-face preference, or another actor's rotation.
+        var option = new FFXIVClientStructs.FFXIV.Client.Game.Control.EmoteController.PlayEmoteOption
+        { VirtualTable = table, TargetId = 0xE0000000UL };
+        if (!manager->ExecuteEmote((ushort)id, &option))
+            throw new InvalidOperationException(T("Игра отклонила парную эмоцию.", "The game rejected the pair emote."));
     }
 
     private void DrawPairSettings()

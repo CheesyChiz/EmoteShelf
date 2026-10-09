@@ -40,6 +40,12 @@ public sealed class EmoteCatalog
 
     public uint IconFor(string command) => commands.TryGetValue(command, out var emote) ? emote.Icon : 0;
 
+    public uint IdFor(string command)
+    {
+        if (command.Equals("/cpose", StringComparison.OrdinalIgnoreCase)) command = "/changepose";
+        return commands.TryGetValue(command, out var emote) ? emote.RowId : 0;
+    }
+
     public (string Name, string Command, uint Icon)? Resolve(string gamePath)
     {
         var file = Path.GetFileNameWithoutExtension(gamePath).ToLowerInvariant();

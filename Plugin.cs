@@ -324,6 +324,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void Update(IFramework _)
     {
+        if (pairSession is null && pendingPoseIndex < 0) pairUntargetedPlayback = false;
         UpdateLink();
         UpdatePair();
         if (manualPoseBookmark is { } manual && Environment.TickCount64 >= manualPoseReturnAt && manualPoseTarget >= 0)
@@ -551,6 +552,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private unsafe void ExecuteEmote(string command)
     {
+        if (pairUntargetedPlayback) { ExecutePairEmote(command); return; }
         // A strict single-token slash command is the only text we ever pass to the game.
         if (!ModScanner.ValidCommand(command)) throw new ArgumentException(T("Недопустимая команда эмоции.", "Invalid emote command."));
         var ui = UIModule.Instance();

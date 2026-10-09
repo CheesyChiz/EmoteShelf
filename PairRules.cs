@@ -6,6 +6,8 @@ namespace EmoteShelf;
 
 public static class PairRules
 {
+    public static float AngleDistance(float a, float b)
+        => float.IsFinite(a) && float.IsFinite(b) ? MathF.Abs(MathF.IEEERemainder(a - b, MathF.Tau)) : float.PositiveInfinity;
     public static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
     public static string Identity(string name, uint homeWorld, uint currentWorld, uint territory)
         => Hash($"es-pair-v2\n{name.Trim().ToUpperInvariant()}\n{homeWorld}\n{currentWorld}\n{territory}");

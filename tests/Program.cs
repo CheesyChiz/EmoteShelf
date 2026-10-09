@@ -132,6 +132,11 @@ if (PairRules.Identity("Alice", 1, 2, 3) != PairRules.Identity(" ALICE ", 1, 2, 
 try { PairRules.StartTime(100, 800, 2000); throw new Exception("High-latency sample was accepted."); }
 catch (InvalidOperationException) { }
 await PairClientTests.Run();
+if (PairRules.AngleDistance(MathF.PI - .01f, -MathF.PI + .01f) > .021f ||
+    PairRules.AngleDistance(0, MathF.PI) < 3 ||
+    !float.IsPositiveInfinity(PairRules.AngleDistance(float.NaN, 0)))
+    throw new Exception("Pair heading wrap/invalid-angle regression");
+Console.WriteLine("Pair heading wraparound and invalid-angle tests passed.");
 var plt = new byte[512];
 void Half(int at, ushort value) => BitConverter.GetBytes(value).CopyTo(plt, at);
 void Word(int at, uint value) => BitConverter.GetBytes(value).CopyTo(plt, at);
