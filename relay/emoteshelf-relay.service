@@ -5,6 +5,9 @@ After=network.target
 [Service]
 Type=simple
 DynamicUser=yes
+StateDirectory=emoteshelf-relay
+StateDirectoryMode=0700
+Environment=EMOTESHELF_REPORT_DB=/var/lib/emoteshelf-relay/reports.sqlite3
 WorkingDirectory=/opt/emoteshelf-relay
 ExecStart=/usr/bin/python3 -B /opt/emoteshelf-relay/server.py
 Restart=on-failure

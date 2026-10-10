@@ -3,6 +3,9 @@ import json
 import threading
 import unittest
 import server
+import tempfile
+import os
+from reports import Reports
 
 
 class HttpTests(unittest.TestCase):
@@ -34,6 +37,21 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.request('GET', '/v1/session')[0], 401)
         self.assertEqual(self.request('GET', '/v1/session/' + 'x'*43)[0], 404)
         self.assertEqual(self.request('GET', '/v1/session', token='x'*43)[0], 404)
+
+    def test_reports_closed_schema_and_no_public_read(self):
+        server.rates.clear()
+        with tempfile.TemporaryDirectory() as temp:
+            server.reports = Reports(os.path.join(temp, 'reports.db'))
+            try:
+                data = dict(id='f'*32, version='0.3.5.0', attempt='', code='invite_blocked', detail='stale',
+                            state='idle', fresh=False, lightless=True, distance=None, angle=None)
+                self.assertEqual(self.request('POST', '/v3/report', data)[0], 202)
+                self.assertEqual(self.request('POST', '/v3/report', dict(data, chat='no'))[0], 400)
+                self.assertEqual(self.request('POST', '/v3/report', dict(data, chat='x'*2200))[0], 413)
+                self.assertEqual(self.request('GET', '/v3/report')[0], 404)
+            finally:
+                server.reports = None
+                server.rates.clear()
 
     def test_link_http(self):
         server.rates.clear()

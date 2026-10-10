@@ -16,6 +16,15 @@ public sealed partial class Plugin
     private long linkNoticeUntil;
     private long pairNoticeUntil;
     private string lastLinkDiagnostic = "", lastInviteDiagnostic = "", lastInviteReason = "";
+    private readonly Queue<string> pairDebugLines = new();
+    private string lastHudDiagnostic = "";
+    private void PairDebug(string text)
+    {
+        if (!config.PairDebug) return;
+        while (pairDebugLines.Count >= 80) pairDebugLines.Dequeue();
+        pairDebugLines.Enqueue($"{DateTime.UtcNow:HH:mm:ss.fff}Z {text}");
+        Log.Information("Pair debug: " + text);
+    }
 
     private string InviteBlockReason(IPlayerCharacter actor)
     {
@@ -40,6 +49,7 @@ public sealed partial class Plugin
 
     private void StopLink()
     {
+        if (link is not null) PairDebug("Stopping local connection; last state=" + link.Snapshot.State);
         link?.Dispose(); link = null;
         lastLinkState = lastLinkPartner = handledInvitation = "";
         CancelPair();
@@ -49,13 +59,18 @@ public sealed partial class Plugin
         if (!config.PairEnabled || !ClientState.IsLoggedIn || Objects.LocalPlayer is not { } local || !LightlessLoaded())
         { if (link is not null) StopLink(); return; }
         if (link is not null && link.Identity != LinkIdentity(local)) StopLink();
-        link ??= new LinkClient(LinkIdentity(local));
+        link ??= new LinkClient(LinkIdentity(local), diagnosticEnabled: config.PairDebug);
+        link.DiagnosticEnabled = config.PairDebug;
+        while (link.TryReadDiagnostic(out var entry)) PairDebug(entry!);
         var s = link.Snapshot;
         var diagnostic = $"state={s.State} fresh={LinkFresh} error={s.Error}";
         if (diagnostic != lastLinkDiagnostic)
         {
             Log.Information("Pair connection: " + diagnostic);
+            PairDebug(diagnostic);
             lastLinkDiagnostic = diagnostic;
+            if (s.State == "error") ReportPairError("connection_failed");
+            else if (s.Error.Length > 0) ReportPairError("request_rejected");
         }
         if (s.Error.Length > 0 && linkNotice != s.Error) { linkNotice = s.Error; linkNoticeUntil = Environment.TickCount64 + 5000; }
         if (s.State != lastLinkState || s.Partner != lastLinkPartner)
@@ -80,7 +95,9 @@ public sealed partial class Plugin
         if (diagnostic != lastInviteDiagnostic)
         {
             Log.Information("Pair invitation menu: " + diagnostic);
+            PairDebug("menu: " + diagnostic);
             lastInviteDiagnostic = diagnostic;
+            if (reason.Length > 0) ReportPairError("invite_blocked");
         }
         args.AddMenuItem(new MenuItem
         {
@@ -98,10 +115,16 @@ public sealed partial class Plugin
     }
     private void DrawLinkSettings()
     {
+        if (ImGui.CollapsingHeader(T("Отправка отчётов ошибок (добровольно)", "Error report uploads (opt-in)"))) DrawReportSettings();
+        if (ImGui.Checkbox(T("Подробная диагностика пары", "Detailed pair diagnostics"), ref config.PairDebug)) Save();
         ImGui.TextWrapped(T("Сервер: ", "Relay: ") + (link?.Snapshot.State ?? "disconnected") +
             (link is not null && !LinkFresh ? T(" — ответ устарел", " — stale response") : ""));
         if (!LightlessLoaded()) ImGui.TextWrapped(T("Lightless не загружен.", "Lightless is not loaded."));
         if (lastInviteReason.Length > 0) ImGui.TextWrapped(T("Последняя проверка меню приглашения: ", "Last invitation menu check: ") + lastInviteReason);
+        if (link?.LastIssue.Length > 0) ImGui.TextWrapped(T("Последняя ошибка (сохраняется для диагностики): ", "Last error (retained for diagnosis): ") + link.LastIssue);
+        if (ImGui.Button(T("Скопировать диагностику", "Copy diagnostics")))
+            ImGui.SetClipboardText($"Emote Shelf {typeof(Plugin).Assembly.GetName().Version}\nRelay: {link?.Snapshot.State ?? "disconnected"}; fresh={LinkFresh}; Lightless loaded={LightlessLoaded()}\nLast menu check: {lastInviteReason}\nLast error: {link?.LastIssue}\n" + string.Join("\n", pairDebugLines));
+        if (config.PairDebug) ImGui.TextWrapped(T("Воспроизведите сбой, затем скопируйте отчёт у обоих игроков. Имена, IP и токены в отчёт не включаются. Повторяющиеся успешные опросы не записываются.", "Reproduce the issue, then copy reports from both players. Reports exclude names, IPs and tokens. Repeated successful polls are omitted."));
         var partner = LinkedPartner;
         ImGui.TextWrapped(link?.Snapshot.State == "linked"
             ? T("Партнёр: ", "Partner: ") + (partner?.Name.TextValue ?? T("не рядом", "not nearby"))
@@ -121,7 +144,10 @@ public sealed partial class Plugin
         var invite = LinkFresh && s?.State == "incoming";
         var outgoing = LinkFresh && s?.State == "outgoing";
         var launch = LinkFresh && s?.Launch is { Status: "waiting" };
-        if (!PairRules.ShowPairHud(config.PairEnabled, LinkFresh, s?.State, linkPreview)) { linkPositionApplied = false; return; }
+        var show = PairRules.ShowPairHud(config.PairEnabled, LinkFresh, s?.State, linkPreview);
+        var hudDiagnostic = $"HUD visible={show} state={s?.State ?? "disconnected"} fresh={LinkFresh} preview={linkPreview} incoming={invite} outgoing={outgoing} launch={launch}";
+        if (lastHudDiagnostic != hudDiagnostic) { PairDebug(hudDiagnostic); lastHudDiagnostic = hudDiagnostic; }
+        if (!show) { linkPositionApplied = false; return; }
         var interactive = invite || outgoing || launch || pairSession is not null;
         var viewport = ImGui.GetMainViewport();
         if (!linkPositionApplied)

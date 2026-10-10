@@ -4,8 +4,14 @@ import re
 import secrets
 import threading
 import time
+import os
+import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from links import LinkStore
+from reports import Reports
+
+reports = None
+report_slots = threading.BoundedSemaphore(2)
 
 HEX = re.compile(r"^[0-9a-f]{64}$")
 TOKEN = re.compile(r"^[A-Za-z0-9_-]{43}$")
@@ -145,6 +151,23 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed():
             return self.reply(429, dict(error='Rate limited'))
         try:
+            if self.path == '/v3/report':
+                if reports is None:
+                    return self.reply(503, dict(error='Reports unavailable'))
+                length = int(self.headers.get('Content-Length', '0'))
+                if not 0 < length <= 2048:
+                    return self.reply(413, dict(error='Invalid body size'))
+                data = json.loads(self.rfile.read(length))
+                address = self.headers.get('X-Forwarded-For', self.client_address[0]).split(',')[0].strip()
+                if not report_slots.acquire(blocking=False):
+                    return self.reply(429, dict(error='Reports busy'))
+                try:
+                    accepted = reports.add(data, address)
+                except sqlite3.Error:
+                    return self.reply(503, dict(error='Reports unavailable'))
+                finally:
+                    report_slots.release()
+                return self.reply(202 if accepted else 429, dict(accepted=accepted))
             if self.path in ('/v2/connect', '/v2/link'):
                 length = int(self.headers.get('Content-Length', '0'))
                 if not 0 < length <= 1024:
@@ -213,4 +236,10 @@ class BoundedServer(ThreadingHTTPServer):
 
 
 if __name__ == '__main__':
+    if os.environ.get('EMOTESHELF_REPORT_DB'):
+        try:
+            reports = Reports(os.environ['EMOTESHELF_REPORT_DB'])
+            threading.Thread(target=reports.maintain, daemon=True).start()
+        except (sqlite3.Error, OSError):
+            print('Report storage unavailable; pair relay remains enabled.', flush=True)
     BoundedServer(('127.0.0.1', 8765), Handler).serve_forever()

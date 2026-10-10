@@ -155,6 +155,8 @@ public sealed partial class Plugin
 
     private void CancelPair(string? reason = null)
     {
+        if (pairSession is not null && reason is not null)
+            ReportPairError(pairAlignStarted && pairAlignment?.Error.Length > 0 ? "alignment_failed" : "launch_cancelled");
         if (pairSession is not null) LogPairDiagnostics(reason ?? "Local cancellation");
         pairUntargetedPlayback = false;
         if (pairOfferId.Length > 0) link?.Act("cancel_launch", invitation: pairOfferId);

@@ -1397,6 +1397,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        errorReports.Dispose();
         ContextMenus.OnMenuOpened -= OnPairContextMenu;
         StopLink();
         CancelPair();

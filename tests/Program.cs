@@ -132,6 +132,7 @@ if (PairRules.Identity("Alice", 1, 2, 3) != PairRules.Identity(" ALICE ", 1, 2, 
 try { PairRules.StartTime(100, 800, 2000); throw new Exception("High-latency sample was accepted."); }
 catch (InvalidOperationException) { }
 await PairClientTests.Run();
+await LinkDiagnosticsTests.Run();
 if (PairRules.AngleDistance(MathF.PI - .01f, -MathF.PI + .01f) > .021f ||
     PairRules.AngleDistance(0, MathF.PI) < 3 ||
     !float.IsPositiveInfinity(PairRules.AngleDistance(float.NaN, 0)))
