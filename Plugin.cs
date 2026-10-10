@@ -571,6 +571,8 @@ public sealed partial class Plugin : IDalamudPlugin
         DrawLinkNotice();
     }
 
+    private Vector2? previousPanelSize;
+    private bool previousPanelLeft, previousPanelUp;
     private void DrawOverlay()
     {
         var flags = ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoTitleBar;
@@ -579,14 +581,23 @@ public sealed partial class Plugin : IDalamudPlugin
         ImGui.SetNextWindowSize(new Vector2(240, 90), ImGuiCond.FirstUseEver);
         if (!ImGui.Begin("Emote Shelf##overlay", flags))
         { ImGui.End(); return; }
+        var panelSize = ImGui.GetWindowSize();
+        if (previousPanelSize is { } oldSize && previousPanelLeft == config.PanelGrowLeft && previousPanelUp == config.PanelGrowUp)
+            ImGui.SetWindowPos(PanelLayout.ResizePosition(ImGui.GetWindowPos(), oldSize, panelSize, config.PanelGrowLeft, config.PanelGrowUp));
+        previousPanelSize = panelSize;
+        previousPanelLeft = config.PanelGrowLeft;
+        previousPanelUp = config.PanelGrowUp;
         if (config.Bookmarks.Count == 0) ImGui.TextDisabled(T("Добавь эмоции: /eshelf → Эмоции", "Add emotes: /eshelf → Emotes"));
         var columns = Math.Clamp(config.Columns, 1, 12);
         var size = new Vector2(Math.Clamp(config.IconSize, 16, 80));
+        var origin = ImGui.GetCursorPos();
+        var cellSize = size + ImGui.GetStyle().FramePadding * 2;
+        var stride = cellSize + ImGui.GetStyle().ItemSpacing;
         ImGui.PushStyleVar(ImGuiStyleVar.Alpha, Math.Clamp(config.PanelOpacity, 0.1f, 1f));
         for (var i = 0; i < config.Bookmarks.Count; i++)
         {
             var bookmark = config.Bookmarks[i];
-            if (i % columns != 0) ImGui.SameLine();
+            ImGui.SetCursorPos(origin + PanelLayout.Cell(i, config.Bookmarks.Count, columns, config.PanelGrowLeft, config.PanelGrowUp) * stride);
             var isPose = ReferenceEquals(manualPoseBookmark, bookmark);
             var poseIcon = catalog?.IconFor("/changepose") ?? 0;
             if (poseIcon == 0) poseIcon = catalog?.IconFor("/cpose") ?? 0;
@@ -595,7 +606,7 @@ public sealed partial class Plugin : IDalamudPlugin
             ImGui.PushID(i);
             var clicked = icon is not null
                 ? ImGui.ImageButton(icon.Handle, size)
-                : ImGui.Button(isPose ? "↻##cpose" : bookmark.Command, size);
+                : ImGui.Button(isPose ? "↻##cpose" : bookmark.Command, cellSize);
             if (clicked)
             {
                 if (ImGui.GetIO().KeyCtrl && ImGui.GetIO().KeyShift)
@@ -1257,6 +1268,10 @@ public sealed partial class Plugin : IDalamudPlugin
         ImGui.SameLine();
         if (ImGui.Checkbox(T("Закрепить положение", "Lock position"), ref config.OverlayLocked)) Save();
         if (ImGui.SliderInt(T("Значков в строке", "Icons per row"), ref config.Columns, 1, 12)) Save();
+        if (ImGui.Checkbox(T("Новые строки вверх", "Grow new rows upward"), ref config.PanelGrowUp)) Save();
+        if (ImGui.Checkbox(T("Новые столбцы влево", "Grow new columns leftward"), ref config.PanelGrowLeft)) Save();
+        ImGui.TextWrapped(T("Выбранный угол панели остаётся на месте при добавлении кнопок. Над чатом включи рост вверх; у правого края — влево. Для одной колонки задай 1 значок в строке.",
+            "The selected corner stays anchored when buttons are added. Above chat, grow upward; at the right edge, grow leftward. For a single column, set icons per row to 1."));
         if (ImGui.SliderFloat(T("Размер значка", "Icon size"), ref config.IconSize, 16, 80)) Save();
         if (ImGui.SliderFloat(T("Прозрачность панели", "Panel opacity"), ref config.PanelOpacity, 0.1f, 1f)) Save();
         ImGui.TextWrapped(T("Панель — отдельное окно с иконками. Открепи её, чтобы перетащить за свободное место. Скрыть можно здесь или командой /eshelf hide.",

@@ -133,6 +133,21 @@ try { PairRules.StartTime(100, 800, 2000); throw new Exception("High-latency sam
 catch (InvalidOperationException) { }
 await PairClientTests.Run();
 await LinkDiagnosticsTests.Run();
+foreach (var left in new[] { false, true })
+foreach (var up in new[] { false, true })
+{
+    var pivot = new System.Numerics.Vector2(left ? 1 : 0, up ? 1 : 0);
+    var oldSize = new System.Numerics.Vector2(100, 40);
+    var newSize = new System.Numerics.Vector2(150, 80);
+    var position = new System.Numerics.Vector2(500, 500);
+    if (PanelLayout.ResizePosition(position, oldSize, newSize, left, up) + newSize * pivot != position + oldSize * pivot)
+        throw new Exception("Panel growth anchor moved");
+    var cells = Enumerable.Range(0, 13).Select(i => PanelLayout.Cell(i, 13, 12, left, up)).ToArray();
+    if (cells.Distinct().Count() != 13 || cells.Any(c => c.X < 0 || c.X >= 12 || c.Y < 0 || c.Y >= 2))
+        throw new Exception("Panel cell placement regressed");
+    if (PanelLayout.Cell(1, 2, 1, left, up).X != 0) throw new Exception("Single column grew horizontally");
+}
+Console.WriteLine("Panel growth directions, anchoring and single-column tests passed.");
 if (PairRules.AngleDistance(MathF.PI - .01f, -MathF.PI + .01f) > .021f ||
     PairRules.AngleDistance(0, MathF.PI) < 3 ||
     !float.IsPositiveInfinity(PairRules.AngleDistance(float.NaN, 0)))

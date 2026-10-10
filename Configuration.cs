@@ -15,6 +15,8 @@ public sealed class Configuration : IPluginConfiguration
     public Dictionary<string, string> ModFolders = new(StringComparer.OrdinalIgnoreCase);
     public bool OverlayLocked;
     public int Columns = 4;
+    public bool PanelGrowLeft;
+    public bool PanelGrowUp;
     public float IconSize = 44;
     public float PanelOpacity = 0.85f;
     public bool English;

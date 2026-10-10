@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../PanelLayout.cs" Link="PanelLayout.cs" />
     <Compile Include="../PoseSlot.cs" Link="PoseSlot.cs" />
     <Compile Include="../ResolvedAnimation.cs" Link="ResolvedAnimation.cs" />
     <Compile Include="../FolderTree.cs" Link="FolderTree.cs" />
