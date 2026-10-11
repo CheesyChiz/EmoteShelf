@@ -255,28 +255,15 @@ public sealed partial class Plugin : IDalamudPlugin
             removeTemporary.Invoke(collection.Id, TemporaryKey);
             activeCollection = collection.Id;
 
-            // Only touch mods with the same game animation path. Other Penumbra mods remain intact.
-            var conflicts = discovered.Where(m => m.Paths.Intersect(selected.Paths, StringComparer.OrdinalIgnoreCase).Any())
-                .DistinctBy(m => m.Directory).ToList();
-            var states = new List<(EmoteMod Mod, int Priority, IReadOnlyDictionary<string, IReadOnlyList<string>> Options)>();
-            foreach (var mod in conflicts)
-            {
-                var (ec, current) = getSettings.Invoke(collection.Id, mod.Directory, "", false);
-                if (ec != PenumbraApiEc.Success || current is null)
-                    throw new InvalidOperationException(string.Format(T("Не удалось прочитать настройки {0}: {1}", "Could not read settings for {0}: {1}"), mod.Name, ec));
-                var value = current.Value;
-                var options = value.Item3.ToDictionary(k => k.Key, v => (IReadOnlyList<string>)v.Value, StringComparer.OrdinalIgnoreCase);
-                states.Add((mod, value.Item2, options));
-            }
+            // Unconfigured, unrelated mods must not block playback of the selected mod.
             var (allEc, allSettings) = getAllSettings.Invoke(collection.Id, false, false, TemporaryKey);
             if (allEc != PenumbraApiEc.Success || allSettings is null)
                 throw new InvalidOperationException(string.Format(T("Не удалось прочитать приоритеты коллекции: {0}", "Could not read collection priorities: {0}"), allEc));
             var highest = allSettings.Values.Where(x => x.Item1).Select(x => x.Item2).DefaultIfEmpty(0).Max();
             if (highest == int.MaxValue) throw new InvalidOperationException(T("Максимальный приоритет Penumbra уже занят.", "Penumbra's maximum priority is already in use."));
             var priority = highest + 1;
-            var chosenState = states.First(x => x.Mod.Directory == selected.Directory);
             IReadOnlyDictionary<string, IReadOnlyList<string>> selectedOptions = bookmark.SavedOptions is null
-                ? chosenState.Options
+                ? ReadModOptions(collection.Id, selected).ToDictionary(x => x.Key, x => (IReadOnlyList<string>)x.Value)
                 : bookmark.SavedOptions.ToDictionary(x => x.Key, x => (IReadOnlyList<string>)x.Value);
             var ecSet = setTemporary.Invoke(collection.Id, selected.Directory, false, true,
                 priority, selectedOptions, "Emote Shelf", TemporaryKey);
@@ -969,10 +956,10 @@ public sealed partial class Plugin : IDalamudPlugin
                 }
                 ImGui.Separator();
                 DrawModInspection(selected[0]);
-                var visibleCards = selected.Where(MatchesLibraryFilter).ToArray();
+                var visibleCards = selected.Where(MatchesLibraryFilter).OrderByDescending(m => m.ConversionTarget).ToArray();
                 var commands = visibleCards.Select(m => m.Command).ToArray();
-                foreach (var mod in visibleCards.Where(m => !EmotePresentation.IsSecondary(m.Command, commands))) DrawEmoteCard(mod);
-                var secondaryCards = visibleCards.Where(m => EmotePresentation.IsSecondary(m.Command, commands)).ToArray();
+                foreach (var mod in visibleCards.Where(m => m.ConvertedTo is null && !EmotePresentation.IsSecondary(m.Command, commands))) DrawEmoteCard(mod);
+                var secondaryCards = visibleCards.Where(m => m.ConvertedTo is not null || EmotePresentation.IsSecondary(m.Command, commands)).ToArray();
                 if (secondaryCards.Length > 0)
                 {
                     ImGui.PushID(selectedModDirectory);
@@ -1056,6 +1043,14 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void DrawEmoteCard(EmoteMod mod)
     {
+        if (mod.ConvertedTo is { } target)
+        {
+            ImGui.TextDisabled(mod.EmoteName + " " + mod.Command);
+            ImGui.TextWrapped(string.Format(T("Перенесено в {0} (Synastry). Используй действующую эмоцию выше.", "Moved to {0} (Synastry). Use the active emote above."), target));
+            return;
+        }
+        if (mod.CarrierCopyCommand is { } carrier)
+            ImGui.TextWrapped(string.Format(T("Копия Emote Shelf: {0}. Исходная эмоция сохранена.", "Emote Shelf copy: {0}. The original emote is preserved."), carrier));
         var visibleVariants = mod.Variants.Where(v => showAllVariants || VariantCompatible(v, mod)).ToArray();
         ImGui.PushID(mod.Command);
         ImGui.BeginGroup();
@@ -1372,9 +1367,7 @@ public sealed partial class Plugin : IDalamudPlugin
         if (Objects.LocalPlayer is not { } player) throw new InvalidOperationException(T("Персонаж не в игре.", "Character is not in game."));
         var (valid, _, collection) = getCollection.Invoke(player.ObjectIndex);
         if (!valid || collection.Id == Guid.Empty) throw new InvalidOperationException(T("Коллекция не найдена.", "Collection not found."));
-        var (ec, current) = getSettings.Invoke(collection.Id, mod.Directory, "", false);
-        if (ec != PenumbraApiEc.Success || current is null) throw new InvalidOperationException($"Penumbra: {ec}");
-        var saved = current.Value.Item3.ToDictionary(x => x.Key, x => x.Value.ToList());
+        var saved = ReadModOptions(collection.Id, mod);
         if (variant is not null)
         {
             foreach (var other in mod.Variants.Where(v => v.Group != variant.Group && v.OffOption is not null &&

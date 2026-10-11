@@ -25,9 +25,9 @@ public sealed partial class Plugin
         var snapshot = SnapshotBookmark(bookmark);
         if (snapshot.SavedOptions is null)
         {
-            var (ec, settings) = getSettings.Invoke(collection.Id, bookmark.ModDirectory, "", false);
-            if (ec != PenumbraApiEc.Success || settings is null) throw new InvalidOperationException("carrier_settings_unavailable");
-            snapshot.SavedOptions = settings.Value.Item3.ToDictionary(p => p.Key, p => p.Value.ToList());
+            var source = discovered.FirstOrDefault(m => m.Directory == bookmark.ModDirectory && m.Command == bookmark.Command)
+                ?? throw new InvalidOperationException("carrier_settings_unavailable");
+            snapshot.SavedOptions = ReadModOptions(collection.Id, source);
         }
         carrierQueued = new(carrierGate.Next(), snapshot, player.GameObjectId, ClientState.TerritoryType, collection.Id, getRoot.Invoke(), pair);
         status = T("Готовлю анимацию для запуска через доступную эмоцию…", "Preparing playback through an unlocked emote…");
@@ -79,7 +79,7 @@ public sealed partial class Plugin
             Exception? last = null;
             foreach (var candidate in candidates)
             {
-                try { return new CarrierResult(CarrierConversion.Create(request.Root, bookmark.ModDirectory, candidate.Command, candidate.Redirects), candidate.Command); }
+                try { return new CarrierResult(CarrierConversion.Create(request.Root, bookmark.ModDirectory, candidate.Command, candidate.Redirects, bookmark.Command), candidate.Command); }
                 catch (InvalidDataException ex) { last = ex; }
             }
             throw last ?? new InvalidDataException("carrier_no_compatible_unlocked_emote");

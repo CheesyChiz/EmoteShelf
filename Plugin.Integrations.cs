@@ -73,6 +73,14 @@ public sealed partial class Plugin
                 "The saved pose slot no longer exists. Choose the pose again and save a new bookmark."));
     }
 
+    private Dictionary<string, List<string>> ReadModOptions(Guid collection, EmoteMod mod)
+    {
+        var (ec, current) = getSettings.Invoke(collection, mod.Directory, "", false);
+        if (ec != PenumbraApiEc.Success) throw new InvalidOperationException($"Penumbra: {ec}");
+        // Success + null means no collection settings; use the author's defaults.
+        return (current?.Item3 ?? mod.DefaultOptions).ToDictionary(x => x.Key, x => x.Value.ToList());
+    }
+
     private void RestoreShelfSelection()
     {
         CancelCarrierPlayback();
@@ -161,8 +169,8 @@ public sealed partial class Plugin
             var (valid, _, collection) = getCollection.Invoke(player.ObjectIndex);
             if (!valid || collection.Id == Guid.Empty) throw new InvalidOperationException(T("Коллекция не найдена.", "Collection not found."));
             var (ec, current) = getSettingsWithTemp.Invoke(collection.Id, mod.Directory, "", false, false, TemporaryKey);
-            if (ec != PenumbraApiEc.Success || current is null) throw new InvalidOperationException("Penumbra: " + ec);
-            var state = current.Value;
+            if (ec != PenumbraApiEc.Success) throw new InvalidOperationException("Penumbra: " + ec);
+            var state = current ?? (false, 0, mod.DefaultOptions, false, false);
             var lines = new List<string> { string.Format(T("Коллекция: {0}", "Collection: {0}"), collection.Name),
                 state.Item1 ? T("Мод включён для тебя.", "The mod is enabled for you.") : T("Мод выключен для тебя.", "The mod is disabled for you."),
                 string.Format(T("Приоритет: {0}", "Priority: {0}"), state.Item2) };

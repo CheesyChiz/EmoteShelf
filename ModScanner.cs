@@ -12,11 +12,15 @@ public sealed record EmoteVariant(string Group, string Option, string[] Paths, s
 public sealed record EmoteMod(string Directory, string Name, string EmoteName, string Command, uint Icon, string[] Paths,
     EmoteVariant[] Variants, int? PoseIndex)
 {
+    public Dictionary<string, List<string>> DefaultOptions { get; init; } = new(StringComparer.Ordinal);
     public int[] PoseSlots { get; init; } = [];
     public string[] BasePaths { get; init; } = [];
     public bool HasSound { get; init; }
     public bool HasVfx { get; init; }
     public bool BaseHasSound { get; init; }
+    public string? ConvertedTo { get; init; }
+    public bool ConversionTarget { get; init; }
+    public string? CarrierCopyCommand { get; init; }
 }
 
 public static partial class ModScanner
@@ -38,6 +42,7 @@ public static partial class ModScanner
             var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var basePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var variants = new List<EmoteVariant>();
+            var defaults = new Dictionary<string, List<string>>(StringComparer.Ordinal);
             string description = "";
             var assetTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var baseHasSound = false;
@@ -59,12 +64,14 @@ public static partial class ModScanner
                         CollectDirectFiles(doc.RootElement, basePaths);
                     Collect(doc.RootElement, paths);
                     CollectVariants(doc.RootElement, variants);
+                    CollectDefaults(doc.RootElement, defaults);
                 }
                 catch (IOException) { }
                 catch (JsonException) { }
                 catch (UnauthorizedAccessException) { }
             }
             if (paths.Count == 0) continue;
+            var conversion = EmoteConversionInfo.Read(Path.Combine(modRoot, "synastry-conversion.json"));
             var byCommand = new Dictionary<string, (string Name, uint Icon, List<string> Paths)>(StringComparer.OrdinalIgnoreCase);
             foreach (var path in paths)
             {
@@ -111,11 +118,38 @@ public static partial class ModScanner
                     [.. entry.Paths.Order(StringComparer.OrdinalIgnoreCase)], relevant,
                     command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? InferGroundSitPose(description, entry.Paths)
                         : IsStandingPoseCommand(command) ? idlePose : null)
-                    { PoseSlots = poseSlots, HasSound = assetTypes.Contains(".scd"), HasVfx = assetTypes.Contains(".avfx"), BaseHasSound = baseHasSound,
+                    { ConvertedTo = conversion is not null && byCommand.ContainsKey(conversion.Target) && command == conversion.Source ? conversion.Target : null,
+                      ConversionTarget = conversion is not null && command == conversion.Target,
+                      DefaultOptions = defaults, PoseSlots = poseSlots, HasSound = assetTypes.Contains(".scd"), HasVfx = assetTypes.Contains(".avfx"), BaseHasSound = baseHasSound,
                       BasePaths = [.. basePaths.Where(p => entry.Paths.Contains(p, StringComparer.OrdinalIgnoreCase))] });
             }
         }
+        foreach (var copy in mods.Keys.Where(d => Path.GetFileName(d) == d && d.StartsWith("EmoteShelfCarrier_", StringComparison.Ordinal)))
+        {
+            var info = EmoteConversionInfo.Read(Path.Combine(root, copy, "emoteshelf-conversion.json"));
+            if (info is null || !result.Any(m => m.Directory == copy && m.Command == info.Target)) continue;
+            for (var i = 0; i < result.Count; i++)
+                if (result[i].Directory == info.SourceDirectory && result[i].Command == info.Source)
+                    result[i] = result[i] with { CarrierCopyCommand = info.Target };
+        }
         return [.. result.OrderBy(m => m.EmoteName, StringComparer.OrdinalIgnoreCase).ThenBy(m => m.Name, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    internal static void CollectDefaults(JsonElement element, Dictionary<string, List<string>> result)
+    {
+        if (element.ValueKind != JsonValueKind.Object) return;
+        if (element.TryGetProperty("Groups", out var groups) && groups.ValueKind == JsonValueKind.Array)
+            foreach (var group in groups.EnumerateArray()) CollectDefaults(group, result);
+        if (!element.TryGetProperty("Type", out var type) || type.ValueKind != JsonValueKind.String ||
+            !element.TryGetProperty("Name", out var name) || name.ValueKind != JsonValueKind.String ||
+            !element.TryGetProperty("Options", out var options) || options.ValueKind != JsonValueKind.Array) return;
+        if (type.GetString() is not ("Single" or "Multi")) return;
+        var selection = element.TryGetProperty("DefaultSettings", out var value) && value.ValueKind == JsonValueKind.Number && value.TryGetUInt64(out var number) ? number : 0;
+        var names = options.EnumerateArray().Select(option => option.ValueKind == JsonValueKind.Object &&
+            option.TryGetProperty("Name", out var optionName) && optionName.ValueKind == JsonValueKind.String ? optionName.GetString() ?? "" : "").ToArray();
+        result[name.GetString()!] = type.GetString() == "Single"
+            ? names.Length > 0 ? [names[(int)Math.Min(selection, (ulong)(names.Length - 1))]] : []
+            : names.Where((_, index) => index < 64 && (selection & (1UL << index)) != 0).ToList();
     }
 
     private static void CollectAssetTypes(JsonElement element, HashSet<string> extensions)

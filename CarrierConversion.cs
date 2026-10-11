@@ -69,7 +69,7 @@ internal static class CarrierConversion
         }
     }
 
-    internal static string Create(string modRoot, string sourceDirectory, string command, IReadOnlyList<Redirect> redirects)
+    internal static string Create(string modRoot, string sourceDirectory, string command, IReadOnlyList<Redirect> redirects, string? sourceCommand = null)
     {
         if (Path.GetFileName(sourceDirectory) != sourceDirectory || sourceDirectory is "" or "." or ".." || redirects.Count == 0)
             throw new InvalidDataException("carrier_source");
@@ -130,6 +130,9 @@ internal static class CarrierConversion
         meta["Name"] = "[ES Carrier " + command + "] " + meta["Name"]?.GetValue<string>();
         meta["Description"] = (meta["Description"]?.GetValue<string>() ?? "") + "\nIndependent carrier snapshot created by Emote Shelf. Original mod unchanged. Source: " + sourceDirectory;
         outputs["meta.json"] = JsonSerializer.SerializeToUtf8Bytes(meta);
+        if (sourceCommand is not null)
+            outputs["emoteshelf-conversion.json"] = JsonSerializer.SerializeToUtf8Bytes(new
+            { schemaVersion = 1, sourceDirectory, sourceCommand, carrierCommand = command });
         foreach (var pair in blobs) outputs.TryAdd(pair.Key, pair.Value);
         // Content-addressed copies can be reused across clicks and plugin restarts.
         // Include file names and lengths to avoid ambiguous concatenation.

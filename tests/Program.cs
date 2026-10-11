@@ -7,6 +7,34 @@ SoundRestartTests.Run();
 CarrierTests.Run();
 OffsetTests.Run();
 SyncTests.Run();
+var conversionFixture = Path.Combine(Path.GetTempPath(), "es-conversion-" + Guid.NewGuid().ToString("N") + ".json");
+try
+{
+    File.WriteAllText(conversionFixture, """{"schemaVersion":1,"sourceCommand":"/bombdance","carrierCommand":"/mandervilledance"}""");
+    var synastryInfo = EmoteConversionInfo.Read(conversionFixture);
+    if (synastryInfo?.Source != "/bombdance" || synastryInfo.Target != "/mandervilledance") throw new Exception("Synastry conversion metadata failed");
+    File.WriteAllText(conversionFixture, """{"schemaVersion":1,"sourceDirectory":"original","sourceCommand":"/bombdance","carrierCommand":"/hum"}""");
+    if (EmoteConversionInfo.Read(conversionFixture)?.SourceDirectory != "original") throw new Exception("Shelf conversion metadata failed");
+    File.WriteAllText(conversionFixture, """{"schemaVersion":1,"sourceCommand":"/bombdance","carrierCommand":"/hum; unsafe"}""");
+    if (EmoteConversionInfo.Read(conversionFixture) is not null) throw new Exception("Invalid carrier command accepted");
+    File.WriteAllText(conversionFixture, "{}");
+    if (EmoteConversionInfo.Read(conversionFixture) is not null) throw new Exception("Incomplete conversion accepted");
+}
+finally { File.Delete(conversionFixture); }
+using (var defaultsDocument = System.Text.Json.JsonDocument.Parse("""
+{"Groups":[
+{"Name":"Core","Type":"Single","DefaultSettings":1,"Options":[{"Name":"A"},{"Name":"B"}]},
+{"Name":"Music","Type":"Multi","DefaultSettings":5,"Options":[{"Name":"On"},{"Name":"Other"},{"Name":"Extra"}]},
+{"Name":"None","Type":"Multi","Options":[{"Name":"Disabled"}]},
+{"Name":"First","Type":"Single","Options":[{"Name":"Default"}]}]}
+"""))
+{
+    var defaults = new Dictionary<string, List<string>>();
+    ModScanner.CollectDefaults(defaultsDocument.RootElement, defaults);
+    if (!defaults["Core"].SequenceEqual(["B"]) || !defaults["Music"].SequenceEqual(["On", "Extra"]) ||
+        defaults["None"].Count != 0 || !defaults["First"].SequenceEqual(["Default"]))
+        throw new Exception("Unconfigured mod author defaults failed");
+}
 foreach (var yaw in new[] { 0f, MathF.PI / 2, -MathF.PI, MathF.Tau })
 {
     var anchor = new System.Numerics.Vector3(20, 7, -12);

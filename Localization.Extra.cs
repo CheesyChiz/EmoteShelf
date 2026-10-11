@@ -12,6 +12,8 @@ internal static partial class Localization
         }
     }
     private const string Additional = """
+Moved to {0} (Synastry). Use the active emote above.|{0}へ移行済み（Synastry）。上の有効なエモートを使用してください。|Nach {0} verschoben (Synastry). Verwende das aktive Emote oben.|Transféré vers {0} (Synastry). Utilisez l’emote active ci-dessus.
+Emote Shelf copy: {0}. The original emote is preserved.|Emote Shelfのコピー：{0}。元のエモートは保持されています。|Emote-Shelf-Kopie: {0}. Das ursprüngliche Emote bleibt erhalten.|Copie Emote Shelf : {0}. L’emote d’origine est conservée.
 Your partner needs to update Emote Shelf to 0.3.9.1 and reconnect.|相手はEmote Shelfを0.3.9.1に更新して再接続する必要があります。|Dein Partner muss Emote Shelf auf 0.3.9.1 aktualisieren und sich erneut verbinden.|Votre partenaire doit mettre Emote Shelf à jour vers 0.3.9.1 et se reconnecter.
 Paired animation — same position|ペアアニメーション — 同じ位置|Paaranimation — gleiche Position|Animation à deux — même position
 Shared dance invitations send selected mod option names to your partner through the relay. They are kept temporarily for invitations and restarts, not in reports.|一緒に踊る招待では選択したMODオプション名をサーバー経由で相手に送信します。招待と再開始のため一時保存され、レポートには含まれません。|Tanzeinladungen senden die Namen gewählter Mod-Optionen über den Server an deinen Partner. Sie werden vorübergehend für Einladungen und Neustarts gespeichert, nicht in Berichten.|Les invitations de danse transmettent les noms des options du mod à votre partenaire via le serveur. Ils sont conservés temporairement pour les invitations et les relances, pas dans les rapports.
