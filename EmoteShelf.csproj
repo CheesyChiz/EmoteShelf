@@ -1,6 +1,6 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.3.9.10</Version>
+    <Version>0.3.9.11</Version>
     <PackageLicenseExpression>AGPL-3.0-only</PackageLicenseExpression>
     <Author>CheesyChiz</Author>
     <Name>Emote Shelf</Name>

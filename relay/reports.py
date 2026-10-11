@@ -12,6 +12,10 @@ CODES = {'connection_failed', 'request_rejected', 'alignment_failed', 'launch_ca
 CODES.add('transfer_failed')
 DETAILS = {'unstable', 'input', 'timeout', 'height', 'state', 'lightless_missing', 'not_connected', 'connection_error', 'stale', 'pending', 'already_linked', 'lightless_api', 'lightless_unhandled', 'unknown'}
 DETAILS |= {'package_validation', 'package_import', 'package_integrity', 'package_busy', 'package_transport'}
+DETAILS |= {'import_extract', 'import_register', 'import_collections', 'import_disable', 'import_authorize', 'import_enable', 'import_verify'}
+DETAILS |= {'import_' + stage + '_' + kind
+            for stage in ('extract', 'register', 'collections', 'disable', 'authorize', 'enable', 'verify')
+            for kind in ('argument', 'index', 'null', 'access', 'io', 'state', 'ipc', 'other')}
 DETAILS |= {'preflight', 'deadline', 'partner_identity', 'lightless_check', 'actor_state',
             'pose_setting', 'pair_transport', 'heartbeat', 'proposal', 'alignment',
             'local_movement', 'alignment_consent', 'partner_movement', 'prepare_mod',

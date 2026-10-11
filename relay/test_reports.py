@@ -7,6 +7,11 @@ from reports import Reports, validate
 
 
 class ReportTests(unittest.TestCase):
+    def test_import_failure_stage_and_kind(self):
+        validate(dict(self.data, code='transfer_failed', detail='import_collections_index'))
+        with self.assertRaises(ValueError):
+            validate(dict(self.data, code='transfer_failed', detail='import_arbitrary_private_text'))
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.now = 2000000

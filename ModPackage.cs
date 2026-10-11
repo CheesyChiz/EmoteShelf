@@ -167,11 +167,11 @@ internal static class ModPackage
             using var source = entry.Open();
             source.CopyTo(destination);
         }
-        // Never reuse a sender's stable ID or name as an import/merge key.
+        // Keep the sender's display name exactly as packaged. Only the generated
+        // directory and removed stable IDs provide import isolation, not a name prefix.
         var metaPath = Path.Combine(target, "meta.json");
         var meta = JsonNode.Parse(File.ReadAllText(metaPath))!.AsObject();
         foreach (var key in meta.Select(p => p.Key).Where(k => k.Equals("Id", StringComparison.OrdinalIgnoreCase) || k.Equals("ModId", StringComparison.OrdinalIgnoreCase) || k.Equals("Identifier", StringComparison.OrdinalIgnoreCase)).ToArray()) meta.Remove(key);
-        meta["Name"] = "[Received] " + (meta["Name"]?.GetValue<string>() ?? directory);
         File.WriteAllText(metaPath, meta.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         return directory;
     }

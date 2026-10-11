@@ -60,6 +60,21 @@ internal static class ModPackageTests
             var first = ModPackage.ExtractNew(Package(), root);
             var second = ModPackage.ExtractNew(Package(), root);
             if (first == second || !File.Exists(Path.Combine(root, first, "anim.pap"))) throw new Exception("Import isolation failed");
+            foreach (var imported in new[] { first, second })
+            {
+                using var metadata = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(root, imported, "meta.json")));
+                if (metadata.RootElement.GetProperty("Name").GetString() != "Test")
+                    throw new Exception("Import changed the sender's display name");
+            }
+            const string originalName = "[Автор] Танец ～ ‘DRIP’ 舞踊";
+            var sourceMeta = Path.Combine(source, "meta.json");
+            var original = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(sourceMeta))!;
+            original["Name"] = originalName;
+            File.WriteAllText(sourceMeta, original.ToJsonString());
+            var namedCopy = ModPackage.ExtractNew(ModPackage.PackMod(root, "Source"), root);
+            using var namedMetadata = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(root, namedCopy, "meta.json")));
+            if (namedMetadata.RootElement.GetProperty("Name").GetString() != originalName)
+                throw new Exception("Whole-mod transfer changed Unicode display name");
         }
         finally { if (Directory.Exists(root)) Directory.Delete(root, true); }
         Console.WriteLine("Package traversal, executable, symlink, reference and isolated extraction tests passed.");

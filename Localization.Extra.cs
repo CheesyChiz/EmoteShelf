@@ -12,6 +12,7 @@ internal static partial class Localization
         }
     }
     private const string Additional = """
+Installation or activation did not complete. Files were not deleted; check the mod in Penumbra. The error code is shown above.|インストールまたは有効化が完了しませんでした。ファイルは削除されていません。PenumbraでMODを確認してください。エラーコードは上に表示されています。|Installation oder Aktivierung nicht abgeschlossen. Dateien wurden nicht gelöscht; prüfe die Mod in Penumbra. Der Fehlercode steht oben.|L’installation ou l’activation n’a pas abouti. Les fichiers n’ont pas été supprimés ; vérifiez le mod dans Penumbra. Le code d’erreur figure ci-dessus.
 {0:F1} MiB · transfer expires in {1}s|{0:F1} MiB · 転送期限まで{1}秒|{0:F1} MiB · Übertragung läuft in {1}s ab|{0:F1} Mio · expiration du transfert dans {1}s
 Uploading to relay|中継サーバーへアップロード中|Upload zum Relay|Envoi au relais
 Waiting for partner download and installation|相手のダウンロードとインストールを待機中|Warte auf Download und Installation beim Partner|En attente du téléchargement et de l’installation chez le partenaire
