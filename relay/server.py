@@ -9,6 +9,7 @@ import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from links import LinkStore
 from reports import Reports
+from transfers import Transfers
 
 reports = None
 report_slots = threading.BoundedSemaphore(2)
@@ -98,6 +99,7 @@ class PairStore:
 
 store = PairStore()
 links = LinkStore()
+transfers = Transfers()
 rate_lock = threading.Lock()
 rates = {}
 
@@ -151,6 +153,17 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed():
             return self.reply(429, dict(error='Rate limited'))
         try:
+            if self.path in ('/v4/transfer', '/v5/transfer'):
+                length = int(self.headers.get('Content-Length', '0'))
+                if not 0 < length <= 360000:
+                    return self.reply(413, dict(error='transfer_body_size'))
+                data = json.loads(self.rfile.read(length))
+                if not isinstance(data, dict):
+                    raise ValueError('transfer_schema')
+                try:
+                    return self.reply(200, transfers.action(links, self.token(), data, protocol=5 if self.path == '/v5/transfer' else 4))
+                except ValueError as ex:
+                    return self.reply(400, dict(error=str(ex)))
             if self.path == '/v3/report':
                 if reports is None:
                     return self.reply(503, dict(error='Reports unavailable'))
@@ -236,6 +249,13 @@ class BoundedServer(ThreadingHTTPServer):
 
 
 if __name__ == '__main__':
+    def maintain_transfers():
+        while True:
+            time.sleep(30)
+            with links.lock:
+                links.prune()
+                transfers.prune(links.users)
+    threading.Thread(target=maintain_transfers, daemon=True).start()
     if os.environ.get('EMOTESHELF_REPORT_DB'):
         try:
             reports = Reports(os.environ['EMOTESHELF_REPORT_DB'])

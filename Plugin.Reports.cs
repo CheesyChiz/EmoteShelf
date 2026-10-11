@@ -16,8 +16,8 @@ public sealed partial class Plugin
         if (ImGui.Begin(T("Emote Shelf — обязательная диагностика", "Emote Shelf — required diagnostics"), ref diagnosticsNoticeOpen, ImGuiWindowFlags.AlwaysAutoResize))
         {
             ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + 570);
-            ImGui.TextWrapped(T("Использование Emote Shelf требует автоматической отправки технических отчётов на anarchyclan.ru. Отключить сбор, продолжая пользоваться плагином, нельзя.",
-                "Using Emote Shelf requires automatic technical reports to anarchyclan.ru. Collection cannot be disabled while continuing to use the plugin."));
+            ImGui.TextWrapped(T("При использовании Emote Shelf технические отчёты автоматически отправляются разработчикам Emote Shelf. Отключить отправку, продолжая пользоваться плагином, нельзя.",
+                "While you use Emote Shelf, technical reports are automatically sent to the Emote Shelf developers. Reporting cannot be disabled while continuing to use the plugin."));
             DrawReportDisclosure();
             ImGui.TextWrapped(T("До принятия плагин не запускает эмоции, не подключает пару и ничего не отправляет. Закрой это окно, чтобы не использовать плагин; отключить или удалить его можно в установщике Dalamud. После принятия прекратить сбор можно отключением плагина.",
                 "Until accepted, the plugin does not play emotes, connect pairs or upload data. Close this window to leave it inactive; disable or uninstall it in Dalamud. After acceptance, disable the plugin to stop collection."));

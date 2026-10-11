@@ -1,6 +1,11 @@
 using EmoteShelf;
 
+try
+{
 LocalizationTests.Run();
+SoundRestartTests.Run();
+CarrierTests.Run();
+OffsetTests.Run();
 
 static void Check(string name, int? actual, int? expected)
 {
@@ -85,6 +90,8 @@ try
     var song = ModScanner.Scan(testRoot, new Dictionary<string, string> { ["SongFixture"] = "SongFixture" }, new EmoteCatalog(), _ => []).Single();
     if (song.BasePaths.Length != 1 || song.Variants.Count(v => v.Group == "Song") != 3 || !song.Variants.Single(v => v.Group == "Music").Multi)
         throw new Exception("Song-only options, DefaultData or Multi group were lost.");
+    if (!song.Variants.Single(v => v.Option == "Town").HasSound || song.Variants.Single(v => v.Option == "None").HasSound)
+        throw new Exception("Selected sound resources were not distinguished from silent variants.");
 }
 finally
 {
@@ -195,6 +202,9 @@ if (compatibility.Matches("chara/human/c0801/animation/a0001/bt_common/emote/tes
     new PapCompatibility([]).Matches("anything", 1401) is not null)
     throw new Exception("PAP fallback filtering regression.");
 Console.WriteLine("PAP redirect and unknown-path filtering tests passed.");
+LibraryTests.Run();
+ModPackageTests.Run();
+await TransferClientTests.Run();
 if (args.Contains("--link-relay-test")) await LinkClientTests.Live();
 else if (args.Contains("--pair-relay-test")) await PairClientTests.Live();
 else if (args.Length == 1)
@@ -206,4 +216,10 @@ else if (args.Length == 1)
     if (guitar.BasePaths.Length == 0 || !guitar.Variants.Where(v => v.Group == "Song").Select(v => v.Option).Order().SequenceEqual(new[] { "None", "To Zanarkand", "Town" }.Order()))
         throw new Exception("Installed Guitar Solo songs were not indexed correctly.");
     Console.WriteLine("Read-only installed Guitar Solo check passed: To Zanarkand, Town, None; base animation retained.");
+}
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine(ex);
+    Environment.ExitCode = 1;
 }

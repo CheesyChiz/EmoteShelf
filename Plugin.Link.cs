@@ -40,7 +40,7 @@ public sealed partial class Plugin
         if (link.Snapshot.State != "idle") return T("сессия не готова", "session not ready");
         if (!LightlessHandles(actor.Address)) return lightlessIpcError.Length > 0
             ? T("ошибка API Lightless: ", "Lightless API error: ") + lightlessIpcError
-            : T("Lightless не обрабатывает этого персонажа", "Lightless does not handle this character");
+            : T("сначала включи синхронизацию с игроком в Lightless", "enable sync with this player in Lightless first");
         return "";
     }
     private static string LinkIdentity(IPlayerCharacter player) => PairRules.Identity(player.Name.TextValue, player.HomeWorld.RowId, 0, 0);
@@ -50,6 +50,7 @@ public sealed partial class Plugin
 
     private void StopLink()
     {
+        StopTransfers();
         if (link is not null) PairDebug("Stopping local connection; last state=" + link.Snapshot.State);
         link?.Dispose(); link = null;
         lastLinkState = lastLinkPartner = handledInvitation = "";

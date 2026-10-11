@@ -38,6 +38,21 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.request('GET', '/v1/session/' + 'x'*43)[0], 404)
         self.assertEqual(self.request('GET', '/v1/session', token='x'*43)[0], 404)
 
+    def test_transfer_route_is_private_and_bounded(self):
+        server.rates.clear()
+        self.assertEqual(self.request('POST', '/v4/transfer', {'action': 'poll'})[0], 400)
+        self.assertEqual(self.request('POST', '/v4/transfer', {'action': 'poll'}, 'x'*43)[0], 400)
+        # Oversize is rejected from headers before reading a body. Sending the body
+        # concurrently with the early close produces a platform-dependent TCP reset.
+        connection = http.client.HTTPConnection('127.0.0.1', self.http.server_port, timeout=2)
+        connection.request('POST', '/v4/transfer', headers={'Content-Length': '360001', 'Authorization': 'Bearer ' + 'x'*43})
+        response = connection.getresponse()
+        self.assertEqual(response.status, 413)
+        response.read()
+        connection.close()
+        self.assertEqual(self.request('GET', '/v4/transfer')[0], 404)
+        server.rates.clear()
+
     def test_reports_closed_schema_and_no_public_read(self):
         server.rates.clear()
         with tempfile.TemporaryDirectory() as temp:

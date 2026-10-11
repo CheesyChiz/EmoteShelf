@@ -40,6 +40,23 @@ public sealed class EmoteCatalog
 
     public uint IconFor(string command) => commands.TryGetValue(command, out var emote) ? emote.Icon : 0;
 
+    public Dictionary<int, string> TimelineSlots(string command)
+    {
+        var result = new Dictionary<int, string>();
+        if (!commands.TryGetValue(command, out var emote)) return result;
+        var index = 0;
+        foreach (var row in emote.ActionTimeline)
+        {
+            if (row.ValueNullable is { } timeline && timeline.Key.ToString().Trim() is { Length: > 0 } key)
+                result[index] = key.Replace('\\', '/').Trim('/').ToLowerInvariant();
+            index++;
+        }
+        return result;
+    }
+
+    public bool IsLoop(string command) => commands.TryGetValue(command, out var emote) &&
+        emote.ActionTimeline.Any(t => t.ValueNullable is { } timeline && timeline.Pause);
+
     public uint IdFor(string command)
     {
         if (command.Equals("/cpose", StringComparison.OrdinalIgnoreCase)) command = "/changepose";

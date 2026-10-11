@@ -19,8 +19,8 @@ class LinkStore:
         other = item['peer'] or item['pending']
         peer = self.users.get(other)
         if peer:
-            peer.update(peer=None, pending=None, incoming=False, invitation='')
-        item.update(peer=None, pending=None, incoming=False, invitation='')
+            peer.update(peer=None, pending=None, incoming=False, invitation='', replay=None)
+        item.update(peer=None, pending=None, incoming=False, invitation='', replay=None)
 
     def clear_offer(self, token):
         item = self.users.get(token)
@@ -60,12 +60,23 @@ class LinkStore:
             if not item:
                 raise ValueError('Expired connection')
             item['seen'] = self.clock()
-            if action == 'propose':
+            if action == 'restart':
+                peer = self.users.get(item['peer'])
+                previous = item.get('replay')
+                if not peer or not previous or peer.get('replay') != previous or item['offer'] or peer['offer']:
+                    raise ValueError('No accepted playback to restart')
+                if self.clock() - previous['at'] > 1800:
+                    raise ValueError('Playback agreement expired')
+                item['offer'] = peer['offer'] = dict(id=secrets.token_hex(32), family=previous['family'],
+                    command=previous['command'], role=previous['role'], previous=previous['id'],
+                    sender=token, status='accepted', until=self.clock()+60)
+            elif action == 'propose':
                 peer = self.users.get(item['peer'])
                 if not peer or item['offer'] or peer['offer']:
                     raise ValueError('Launch already pending or not linked')
                 if not isinstance(offer, dict) or set(offer) != {'id', 'family', 'command', 'role'} or not all(isinstance(v, str) and re.fullmatch('[0-9a-f]{64}', v) for v in offer.values()):
                     raise ValueError('Invalid proposal')
+                item['replay'] = peer['replay'] = None
                 item['offer'] = peer['offer'] = dict(**offer, sender=token, status='waiting', until=self.clock()+60)
             elif action in ('accept_launch', 'reject_launch', 'cancel_launch', 'finish_launch'):
                 current = item['offer']
@@ -81,6 +92,9 @@ class LinkStore:
                         raise ValueError('Not accepted')
                     current.setdefault('finished', set()).add(token)
                     if len(current['finished']) == 2:
+                        replay = {k: current[k] for k in ('id', 'family', 'command', 'role')}
+                        replay['at'] = self.clock()
+                        item['replay'] = self.users[item['peer']]['replay'] = replay
                         self.clear_offer(token)
                 else:
                     self.clear_offer(token)
@@ -118,6 +132,7 @@ class LinkStore:
             state = 'linked' if item['peer'] else ('incoming' if item['incoming'] else 'outgoing') if peer else 'idle'
             current = item['offer']
             launch = dict(id=current['id'], family=current['family'], command=current['command'], role=current['role'],
-                          incoming=current['sender'] != token, status=current['status'], remaining=max(0, int(current['until']-self.clock()))) if current else None
+                          incoming=current['sender'] != token, status=current['status'], remaining=max(0, int(current['until']-self.clock())),
+                          previous=current.get('previous', '')) if current else None
             return dict(state=state, partner=peer['identity'] if peer else '', invitation=item['invitation'],
                         remaining=max(0, int(item['until']-self.clock())) if item['pending'] else 0, launch=launch)

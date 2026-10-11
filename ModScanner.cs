@@ -7,12 +7,16 @@ public sealed record EmoteVariant(string Group, string Option, string[] Paths, s
 {
     public Dictionary<string, string> Files { get; init; } = new(StringComparer.OrdinalIgnoreCase);
     public bool Multi { get; init; }
+    public bool HasSound { get; init; }
 }
 public sealed record EmoteMod(string Directory, string Name, string EmoteName, string Command, uint Icon, string[] Paths,
     EmoteVariant[] Variants, int? PoseIndex)
 {
     public int[] PoseSlots { get; init; } = [];
     public string[] BasePaths { get; init; } = [];
+    public bool HasSound { get; init; }
+    public bool HasVfx { get; init; }
+    public bool BaseHasSound { get; init; }
 }
 
 public static partial class ModScanner
@@ -35,6 +39,8 @@ public static partial class ModScanner
             var basePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var variants = new List<EmoteVariant>();
             string description = "";
+            var assetTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var baseHasSound = false;
             foreach (var file in new[] { "meta.json", "default_mod.json" }.Concat(
                          Directory.Exists(modRoot) ? Directory.EnumerateFiles(modRoot, "group_*.json", SearchOption.TopDirectoryOnly) : []))
             {
@@ -43,6 +49,9 @@ public static partial class ModScanner
                 try
                 {
                     using var doc = JsonDocument.Parse(File.ReadAllText(full));
+                    CollectAssetTypes(doc.RootElement, assetTypes);
+                    if (Path.GetFileName(full).Equals("default_mod.json", StringComparison.OrdinalIgnoreCase))
+                        baseHasSound |= DirectHasSound(doc.RootElement);
                     if (Path.GetFileName(full).Equals("meta.json", StringComparison.OrdinalIgnoreCase)
                         && doc.RootElement.TryGetProperty("Description", out var d)) description = d.GetString() ?? "";
                     if (Path.GetFileName(full).Equals("meta.json", StringComparison.OrdinalIgnoreCase) ||
@@ -102,11 +111,33 @@ public static partial class ModScanner
                     [.. entry.Paths.Order(StringComparer.OrdinalIgnoreCase)], relevant,
                     command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? InferGroundSitPose(description, entry.Paths)
                         : IsStandingPoseCommand(command) ? idlePose : null)
-                    { PoseSlots = poseSlots,
+                    { PoseSlots = poseSlots, HasSound = assetTypes.Contains(".scd"), HasVfx = assetTypes.Contains(".avfx"), BaseHasSound = baseHasSound,
                       BasePaths = [.. basePaths.Where(p => entry.Paths.Contains(p, StringComparer.OrdinalIgnoreCase))] });
             }
         }
         return [.. result.OrderBy(m => m.EmoteName, StringComparer.OrdinalIgnoreCase).ThenBy(m => m.Name, StringComparer.OrdinalIgnoreCase)];
+    }
+
+    private static void CollectAssetTypes(JsonElement element, HashSet<string> extensions)
+    {
+        if (element.ValueKind == JsonValueKind.Array)
+            foreach (var child in element.EnumerateArray()) CollectAssetTypes(child, extensions);
+        else if (element.ValueKind == JsonValueKind.Object)
+            foreach (var property in element.EnumerateObject())
+            {
+                if (property.Name is "Files" or "FileSwaps" && property.Value.ValueKind == JsonValueKind.Object)
+                    foreach (var file in property.Value.EnumerateObject()) extensions.Add(Path.GetExtension(file.Name));
+                CollectAssetTypes(property.Value, extensions);
+            }
+    }
+
+    private static bool DirectHasSound(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object) return false;
+        if (root.TryGetProperty("DefaultData", out var data) && DirectHasSound(data)) return true;
+        return new[] { "Files", "FileSwaps" }.Any(key => root.TryGetProperty(key, out var files) &&
+            files.ValueKind == JsonValueKind.Object && files.EnumerateObject().Any(file =>
+                file.Name.EndsWith(".scd", StringComparison.OrdinalIgnoreCase)));
     }
 
     private static void Collect(JsonElement element, HashSet<string> paths)
@@ -184,7 +215,7 @@ public static partial class ModScanner
                             optionPaths.Contains(file.Name.Replace('\\', '/')))
                             files[file.Name.Replace('\\', '/').ToLowerInvariant()] = file.Value.GetString() ?? "";
                 variants.Add(new EmoteVariant(groupName, optionName, [.. optionPaths], offOption)
-                    { Files = files, Multi = string.Equals(type.GetString(), "Multi", StringComparison.OrdinalIgnoreCase) });
+                    { Files = files, Multi = string.Equals(type.GetString(), "Multi", StringComparison.OrdinalIgnoreCase), HasSound = DirectHasSound(option) });
             }
         }
     }

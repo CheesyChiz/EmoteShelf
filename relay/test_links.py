@@ -3,6 +3,23 @@ from links import LinkStore
 
 
 class LinkTests(unittest.TestCase):
+    def test_restart_only_after_both_finished_and_same_link(self):
+        invitation = self.invite()['invitation']
+        self.store.action(self.b, 'accept', invitation=invitation)
+        with self.assertRaises(ValueError): self.store.action(self.a, 'restart')
+        offer = dict(id='1'*64, family='2'*64, command='3'*64, role='4'*64)
+        self.store.action(self.a, 'propose', offer=offer)
+        self.store.action(self.b, 'accept_launch', invitation=offer['id'])
+        self.store.action(self.a, 'finish_launch', invitation=offer['id'])
+        with self.assertRaises(ValueError): self.store.action(self.b, 'restart')
+        self.store.action(self.b, 'finish_launch', invitation=offer['id'])
+        restart = self.store.action(self.a, 'restart')['launch']
+        self.assertEqual(restart['previous'], offer['id'])
+        self.assertEqual(restart['status'], 'accepted')
+        self.assertNotEqual(restart['id'], offer['id'])
+        self.store.action(self.b, 'disconnect')
+        with self.assertRaises(ValueError): self.store.action(self.a, 'restart')
+
     def setUp(self):
         self.now = 100
         self.store = LinkStore(lambda: self.now)

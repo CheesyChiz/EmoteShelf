@@ -1,6 +1,7 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>0.3.6.0</Version>
+    <Version>0.3.8.0</Version>
+    <PackageLicenseExpression>AGPL-3.0-only</PackageLicenseExpression>
     <Author>CheesyChiz</Author>
     <Name>Emote Shelf</Name>
     <InternalName>EmoteShelf</InternalName>
@@ -12,15 +13,16 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PenumbraLibPath Condition="'$(PenumbraLibPath)' == ''">$(APPDATA)\XIVLauncher\installedPlugins\Penumbra\1.7.2.1</PenumbraLibPath>
   </PropertyGroup>
   <ItemGroup>
     <Compile Remove="tests/**/*.cs" />
     <Reference Include="Penumbra.Api">
-      <HintPath>C:\Users\Whale\AppData\Roaming\XIVLauncher\installedPlugins\Penumbra\1.7.2.1\Penumbra.Api.dll</HintPath>
+      <HintPath>$(PenumbraLibPath)\Penumbra.Api.dll</HintPath>
       <Private>true</Private>
     </Reference>
     <Reference Include="Luna">
-      <HintPath>C:\Users\Whale\AppData\Roaming\XIVLauncher\installedPlugins\Penumbra\1.7.2.1\Luna.dll</HintPath>
+      <HintPath>$(PenumbraLibPath)\Luna.dll</HintPath>
       <Private>true</Private>
     </Reference>
   </ItemGroup>

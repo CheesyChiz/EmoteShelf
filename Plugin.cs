@@ -53,6 +53,8 @@ public sealed partial class Plugin : IDalamudPlugin
     private long sendAt;
     private long redrawDeadline;
     private bool redrawCompleted;
+    private readonly SoundRestart soundRestart = new();
+    private ulong soundRestartActor;
     private int pendingPoseIndex = -1;
     private EmoteController.PoseType pendingPoseType = EmoteController.PoseType.GroundSit;
     private long poseAt;
@@ -102,17 +104,12 @@ public sealed partial class Plugin : IDalamudPlugin
         config.CommandOverrides ??= new(StringComparer.OrdinalIgnoreCase);
         config.HiddenMods ??= new(StringComparer.OrdinalIgnoreCase);
         config.PoseOverrides ??= new(StringComparer.OrdinalIgnoreCase);
+        config.PairPresets ??= [];
         config.Folders ??= [];
         config.ModFolders ??= new(StringComparer.OrdinalIgnoreCase);
         config.ClosedFolders ??= new(StringComparer.OrdinalIgnoreCase);
         collapsedFolders.UnionWith(config.ClosedFolders);
         expandedFolders.UnionWith(config.Folders.Except(collapsedFolders));
-        if (!config.ManualPoseMigration)
-        {
-            config.AutomaticPose = false;
-            config.ManualPoseMigration = true;
-            Save();
-        }
         if (string.IsNullOrEmpty(config.Language)) config.Language = config.English ? "en" : "ru";
         status = T("Поиск замен эмоций в Penumbra…", "Searching Penumbra emote replacements…");
         Commands.AddHandler("/eshelf", new CommandInfo(OnCommand) { HelpMessage = "Emote Shelf: /eshelf, /eshelf scan, /eshelf show, /eshelf hide" });
@@ -128,12 +125,21 @@ public sealed partial class Plugin : IDalamudPlugin
     private void OnGameObjectRedrawn(nint address, int index)
     {
         if (Objects.LocalPlayer is { } player && (index == player.ObjectIndex || address == player.Address))
+        {
             redrawCompleted = true;
+            if (soundRestart.Stage == SoundRestart.State.AwaitRedraw && player.GameObjectId == soundRestartActor &&
+                index == player.ObjectIndex && address == player.Address)
+            {
+                soundRestart.Confirm(Environment.TickCount64);
+                Log.Information("Sound restart: redraw confirmed; settling before playback");
+            }
+        }
     }
     private void OpenSettings() { settingsOpen = true; diagnosticsNoticeOpen = true; }
     private void OnCommand(string _, string args)
     {
         if (!DiagnosticsAcknowledged) { diagnosticsNoticeOpen = true; return; }
+        if (HandleLibraryCommand(args)) return;
         switch (args.Trim().ToLowerInvariant())
         {
             case "scan": Scan(); settingsOpen = true; break;
@@ -147,6 +153,7 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         try
         {
+            if (!IntegrationLoaded("Penumbra")) throw new InvalidOperationException(T("Penumbra недоступна.", "Penumbra is unavailable."));
             var root = getRoot.Invoke();
             var mods = getMods.Invoke();
             if (string.IsNullOrWhiteSpace(root) || mods is null) throw new InvalidOperationException(T("Penumbra недоступна.", "Penumbra is unavailable."));
@@ -160,10 +167,10 @@ public sealed partial class Plugin : IDalamudPlugin
                     m.Command.Equals(bookmark.Command, StringComparison.OrdinalIgnoreCase));
                 if (match is null) continue;
                 if (bookmark.IconId == 0 && match.Icon != 0) { bookmark.IconId = match.Icon; changedBookmarks = true; }
-                if (match.PoseIndex.HasValue && bookmark.PoseIndex != match.PoseIndex)
+                if (match.PoseIndex.HasValue && !bookmark.PoseIndex.HasValue)
                 { bookmark.PoseIndex = match.PoseIndex; changedBookmarks = true; }
                 else if (match.PoseSlots.Length > 1 &&
-                    (!bookmark.PoseIndex.HasValue || !match.PoseSlots.Contains(bookmark.PoseIndex.Value)))
+                    !bookmark.PoseIndex.HasValue)
                 { bookmark.PoseIndex = match.PoseSlots[0]; changedBookmarks = true; }
                 if (match.PoseSlots.Length > 0 && bookmark.SavedOptions is not null)
                 {
@@ -174,7 +181,7 @@ public sealed partial class Plugin : IDalamudPlugin
                         (bookmark.Name.EndsWith($"— {v.Group} → {v.Option}", StringComparison.Ordinal) ||
                          bookmark.Name.EndsWith($"— {v.Option}", StringComparison.Ordinal)));
                     var variantPose = selectedVariant is null ? null : PoseSlot.FromPaths(selectedVariant.Paths, prefix);
-                    if (variantPose.HasValue && bookmark.PoseIndex != variantPose)
+                    if (variantPose.HasValue && !bookmark.PoseIndex.HasValue)
                     { bookmark.PoseIndex = variantPose; changedBookmarks = true; }
                     if (selectedVariant is not null && bookmark.Name.Equals(
                             $"{match.Name} — {match.EmoteName} — {selectedVariant.Option}", StringComparison.Ordinal))
@@ -193,7 +200,7 @@ public sealed partial class Plugin : IDalamudPlugin
             }
             if (changedBookmarks) Save();
             status = string.Format(T("В списке {0} сочетаний мод–эмоция.", "Showing {0} mod–emote pairs."),
-                discovered.Count(m => !config.HiddenMods.Contains(m.Directory)));
+                discovered.Count(m => !IsCarrierCopy(m.Directory) && !config.HiddenMods.Contains(m.Directory)));
             initialScanPending = false;
         }
         catch (Exception ex)
@@ -205,6 +212,10 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void Play(Bookmark bookmark, bool pairPreparation = false)
     {
+        CancelCarrierPlayback();
+        RestoreOffset();
+        if (!pairPreparation) lastAcceptedPair = null;
+        soundRestart.Reset();
         if (!pairPreparation) CancelPair();
         manualPoseBookmark = null;
         launchingBookmark = bookmark;
@@ -219,10 +230,17 @@ public sealed partial class Plugin : IDalamudPlugin
             m.Command.Equals(bookmark.Command, StringComparison.OrdinalIgnoreCase));
         if (selected is null) { Scan(); selected = discovered.FirstOrDefault(m => m.Directory == bookmark.ModDirectory &&
             m.Command.Equals(bookmark.Command, StringComparison.OrdinalIgnoreCase)); }
-        selected ??= discovered.FirstOrDefault(m => m.Directory == bookmark.ModDirectory);
         if (selected is null) { status = T("Мод не найден в Penumbra; обнови список.", "Mod not found in Penumbra; refresh the list."); return; }
         try
         {
+            ValidateBookmark(bookmark, selected);
+            PrepareOffset(bookmark);
+            if (catalog?.IsUnlocked(bookmark.Command, Unlocks) == false)
+            {
+                try { QueueCarrier(bookmark, pairPreparation); }
+                catch (Exception ex) { CarrierFailure(ex); }
+                return;
+            }
             if (PosePlayback.ShouldStandUp(bookmark.Command, IsGroundSitting()))
             {
                 StandUpFromGroundSit();
@@ -266,7 +284,13 @@ public sealed partial class Plugin : IDalamudPlugin
                 throw new InvalidOperationException(string.Format(T("Не удалось переключить {0}: {1}", "Could not switch {0}: {1}"), selected.Name, ecSet));
             redrawCompleted = false;
             redrawDeadline = Environment.TickCount64 + 1600;
-            try { if (!IsPoseCommand(bookmark.Command)) redraw.Invoke(player.ObjectIndex, RedrawType.Redraw); }
+            if (SoundRestart.Needed(bookmark.Command, IsPlayingLoop(), selected, selectedOptions))
+            {
+                soundRestartActor = player.GameObjectId;
+                soundRestart.Begin();
+                Log.Information("Sound restart: selected sound resources; settings applied; redraw queued");
+            }
+            try { if (!IsPoseCommand(bookmark.Command) && soundRestart.Stage == SoundRestart.State.Inactive) redraw.Invoke(player.ObjectIndex, RedrawType.Redraw); }
             catch (Exception ex) { redrawCompleted = true; Log.Warning(ex, "Redraw failed; animation may remain cached"); }
             pendingCommand = bookmark.Command.Trim();
             pendingModDirectory = selected.Directory;
@@ -333,6 +357,10 @@ public sealed partial class Plugin : IDalamudPlugin
         if (!DiagnosticsAcknowledged) return;
         if (pairSession is null && pendingPoseIndex < 0) pairUntargetedPlayback = false;
         UpdateLink();
+        UpdateTransfers();
+        UpdateAutomaticPair();
+        UpdateOffset();
+        UpdateCarrier();
         pairAlignment?.Update();
         UpdatePair();
         if (manualPoseBookmark is { } manual && Environment.TickCount64 >= manualPoseReturnAt && manualPoseTarget >= 0)
@@ -371,6 +399,41 @@ public sealed partial class Plugin : IDalamudPlugin
         }
         if (pendingCommand.Length > 0 && Environment.TickCount64 >= sendAt)
         {
+            if (soundRestart.Stage != SoundRestart.State.Inactive)
+            {
+                try
+                {
+                    if (Objects.LocalPlayer is not { } soundActor || soundActor.GameObjectId != soundRestartActor)
+                        throw new InvalidOperationException("sound_restart_actor_changed");
+                    if (soundRestart.Stage == SoundRestart.State.ApplySettings)
+                    {
+                        soundRestart.Requested(Environment.TickCount64);
+                        redraw.Invoke(soundActor.ObjectIndex, RedrawType.Redraw);
+                        Log.Information("Sound restart: redraw requested");
+                        return;
+                    }
+                    var stage = soundRestart.Advance(Environment.TickCount64);
+                    if (stage == SoundRestart.State.Failed) throw new InvalidOperationException("sound_restart_redraw_timeout");
+                    if (stage != SoundRestart.State.Ready) return;
+                    Log.Information("Sound restart: redraw settled; validating prepared mod before playback");
+                    soundRestart.Reset();
+                }
+                catch (Exception ex)
+                {
+                    pendingCommand = ""; pendingPoseIndex = -1;
+                    soundRestart.Reset();
+                    status = T("Не удалось подтвердить перерисовку для перезапуска звука. Анимация не запущена; попробуй ещё раз.",
+                        "Redraw could not be confirmed for sound restart. The animation was not started; try again.");
+                    if (pairSession is not null) { pairCheckpoint = "prepare_validation"; CancelPair(status); }
+                    ClearPendingValidation();
+                    Log.Warning("Sound restart failed: {Reason}", ex is InvalidOperationException ? ex.Message : ex.GetType().Name);
+                    errorReports.Send("launch_cancelled", ex.Message == "sound_restart_redraw_timeout" ? "timeout" :
+                        ex.Message == "sound_restart_actor_changed" ? "actor_state" : "prepare_mod",
+                        link?.Snapshot.State ?? "none", LinkFresh, LightlessLoaded(), "", null, null,
+                        new ReportContext("none", false, false, true, true, false, 0));
+                    return;
+                }
+            }
             if (!IsPoseCommand(pendingCommand) && !redrawCompleted && Environment.TickCount64 < redrawDeadline) return;
             if (!IsPoseCommand(pendingCommand) && !redrawCompleted) Log.Warning("Penumbra redraw confirmation timed out; continuing with verified mod paths");
             var command = pendingCommand;
@@ -405,7 +468,7 @@ public sealed partial class Plugin : IDalamudPlugin
                     pairConfirmUntil = Environment.TickCount64 + 5000;
                     // UpdatePair confirms position/facing after redraw before readiness.
                 }
-                else DispatchPreparedCommand(command);
+                else { DispatchPreparedCommand(command); ScheduleOffset(launchingBookmark); }
             }
             catch (Exception ex)
             {
@@ -419,7 +482,6 @@ public sealed partial class Plugin : IDalamudPlugin
         }
         if (pairSession is not null) return;
         if (pendingPoseIndex < 0 || pendingCommand.Length > 0 || Environment.TickCount64 < poseAt) return;
-        if (!config.AutomaticPose) { pendingPoseIndex = -1; return; }
         try
         {
             var currentPose = CurrentPoseIndex(pendingPoseType);
@@ -474,7 +536,7 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         if (!IsPoseCommand(command)) { ExecuteEmote(command); return; }
         var plan = PosePlayback.Prepare(command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase),
-            CurrentPoseIndex(pendingPoseType) >= 0, config.AutomaticPose, pendingPoseIndex >= 0);
+            CurrentPoseIndex(pendingPoseType) >= 0, true, pendingPoseIndex >= 0);
         if (plan.Action == PosePlayback.Entry.RefreshActivePose)
         {
             if (Objects.LocalPlayer is { } local) redraw.Invoke(local.ObjectIndex, RedrawType.Redraw);
@@ -515,12 +577,16 @@ public sealed partial class Plugin : IDalamudPlugin
                character->ModeParam == 1;
     }
 
+    private unsafe bool IsPlayingLoop()
+        => Objects.LocalPlayer is { } player && ((Character*)player.Address)->Mode is
+            CharacterModes.EmoteLoop or CharacterModes.InPositionLoop;
+
     private unsafe void ExecutePreparedEmote(string command, bool setSavedSlot)
     {
         // Initial ground-sit selection happens just before entering the
         // stance, never while already seated. Active poses use ordinary /cpose.
         var state = PlayerState.Instance();
-        if (!setSavedSlot || !config.AutomaticPose || !command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ||
+        if (!setSavedSlot || !command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ||
             pendingPoseIndex < 0 || pendingPoseIndex > EmoteController.GetAvailablePoses(EmoteController.PoseType.GroundSit) ||
             IsGroundSitting() || state == null)
         { ExecuteEmote(command); return; }
@@ -577,6 +643,7 @@ public sealed partial class Plugin : IDalamudPlugin
     {
         if (!DiagnosticsAcknowledged) { DrawDiagnosticsNotice(); return; }
         if (settingsOpen) DrawSettings();
+        DrawTransferNotice();
         if (config.OverlayVisible) DrawOverlay();
         DrawLinkNotice();
     }
@@ -706,6 +773,7 @@ public sealed partial class Plugin : IDalamudPlugin
                 ImGui.EndTabItem();
             }
             if (ImGui.BeginTabItem(T("Панель", "Panel") + "###panel")) { DrawPanelTab(); ImGui.EndTabItem(); }
+            if (ImGui.BeginTabItem(T("Передача модов", "Mod transfers") + "###transfers", selectTransfersTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None)) { selectTransfersTab = false; DrawTransfers(); ImGui.EndTabItem(); }
             if (ImGui.BeginTabItem(T("Как пользоваться", "How to use") + "###help")) { DrawHelpTab(); ImGui.EndTabItem(); }
             if (ImGui.BeginTabItem(T("Настройки", "Settings") + "###settings")) { DrawAdvancedTab(); ImGui.EndTabItem(); }
             ImGui.EndTabBar();
@@ -722,14 +790,15 @@ public sealed partial class Plugin : IDalamudPlugin
         ImGui.Spacing();
         ImGui.TextUnformatted(T("БИБЛИОТЕКА", "LIBRARY"));
         ImGui.SameLine();
-        ImGui.TextDisabled($"{discovered.Where(m => m.Command.Length > 0 && !config.HiddenMods.Contains(m.Directory)).Select(m => m.Directory).Distinct().Count()} {T("модов", "mods")}");
+        ImGui.TextDisabled($"{discovered.Where(m => !IsCarrierCopy(m.Directory) && m.Command.Length > 0 && !config.HiddenMods.Contains(m.Directory)).Select(m => m.Directory).Distinct().Count()} {T("модов", "mods")}");
         ImGui.SetNextItemWidth(Math.Max(150, ImGui.GetContentRegionAvail().X - 160));
         ImGui.InputTextWithHint("##search", T("Поиск по эмоции или моду", "Search emote or mod"), ref search, 120);
         ImGui.SameLine();
         if (ImGui.Button(T("Обновить", "Refresh"))) Scan();
+        DrawLibraryFilter();
         ImGui.Spacing();
 
-        var groups = discovered.Where(m => m.Command.Length > 0 && (!config.HiddenMods.Contains(m.Directory) || m.Directory == rightClickMod))
+        var groups = discovered.Where(m => MatchesLibraryFilter(m) && m.Command.Length > 0 && (!config.HiddenMods.Contains(m.Directory) || m.Directory == rightClickMod))
             .GroupBy(m => m.Directory, StringComparer.OrdinalIgnoreCase)
             .Where(g => g.Any(m => m.Name.Contains(search, StringComparison.OrdinalIgnoreCase) ||
                 m.EmoteName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
@@ -840,6 +909,8 @@ public sealed partial class Plugin : IDalamudPlugin
             else
             {
                 ImGui.TextUnformatted(selected[0].Name);
+                if (selected[0].HasSound) ImGui.TextDisabled(T("Со звуковыми файлами", "Contains sound files"));
+                if (selected[0].HasVfx) ImGui.TextDisabled(T("С VFX", "Contains VFX"));
                 ImGui.SetNextItemWidth(180);
                 var currentFolder = FolderFor(selectedModDirectory);
                 if (ImGui.BeginCombo("##moveFolder", string.Format(T("Папка: {0}", "Folder: {0}"),
@@ -861,7 +932,8 @@ public sealed partial class Plugin : IDalamudPlugin
                     ImGui.EndPopup();
                 }
                 ImGui.Separator();
-                foreach (var mod in selected) DrawEmoteCard(mod);
+                DrawModInspection(selected[0]);
+                foreach (var mod in selected.Where(MatchesLibraryFilter)) DrawEmoteCard(mod);
             }
         }
         ImGui.EndChild();
@@ -945,17 +1017,25 @@ public sealed partial class Plugin : IDalamudPlugin
         ImGui.TextDisabled(mod.Command);
         var locked = catalog?.IsUnlocked(mod.Command, Unlocks) == false;
         if (locked) ImGui.TextColored(new Vector4(1f, .65f, .25f, 1f), T("Не разблокирована", "Not unlocked"));
+        if (locked && ImGui.IsItemHovered()) ImGui.SetTooltip(T("При обычном запуске плагин автоматически подберёт доступную эмоцию. Оригинал мода не изменится.", "Normal playback automatically selects an unlocked emote. The original mod stays unchanged."));
         if (mod.Variants.Length == 0)
         {
-            ImGui.BeginDisabled(locked);
             if (ImGui.SmallButton(T("Предпросмотр", "Preview"))) Preview(mod, null);
             ImGui.SameLine();
             if (ImGui.SmallButton(T("На панель", "Add to panel"))) AddBookmark(mod, null);
             if (config.PairEnabled) { ImGui.SameLine(); if (ImGui.SmallButton(T("В паре", "Pair"))) BeginPair(mod); }
-            ImGui.EndDisabled();
         }
         ImGui.EndGroup();
         if (IsPoseCommand(mod.Command)) DrawPoseSelector(mod);
+        if (ImGui.SmallButton(T("Передать мод и предложить запуск", "Send mod with playback offer")))
+        {
+            if (mod.Variants.Length > 0 && draftOptions.ContainsKey(mod.Directory)) PlayDraft(mod, false, transfer: true);
+            else
+            {
+                try { PrepareTransferLaunch(CreateBookmark(mod, null)); }
+                catch (Exception ex) { status = ex.Message; }
+            }
+        }
         if (mod.Variants.Length > 0)
         {
             ImGui.Checkbox(T("Показать все варианты", "Show all variants"), ref showAllVariants);
@@ -999,12 +1079,10 @@ public sealed partial class Plugin : IDalamudPlugin
                     ImGui.PopID();
                 }
                 ImGui.Spacing();
-                ImGui.BeginDisabled(locked);
                 if (ImGui.Button(T("Предпросмотр", "Preview"))) PlayDraft(mod, false);
                 ImGui.SameLine();
                 if (ImGui.Button(T("На панель", "Add to panel"))) PlayDraft(mod, true);
                 if (config.PairEnabled) { ImGui.SameLine(); if (ImGui.Button(T("В паре", "Pair"))) PlayDraft(mod, false, true); }
-                ImGui.EndDisabled();
             }
         }
         ImGui.EndGroup();
@@ -1012,7 +1090,7 @@ public sealed partial class Plugin : IDalamudPlugin
         ImGui.PopID();
     }
 
-    private void PlayDraft(EmoteMod mod, bool add, bool pair = false)
+    private void PlayDraft(EmoteMod mod, bool add, bool pair = false, bool transfer = false)
     {
         try
         {
@@ -1024,7 +1102,8 @@ public sealed partial class Plugin : IDalamudPlugin
             bookmark.Name = $"{mod.Name} — {mod.EmoteName} — " + string.Join("; ", active.Select(v => $"{v.Group}: {v.Option}"));
             var pose = PoseSlot.FromPaths(active.SelectMany(v => v.Paths), mod.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? "j_" : "");
             if (IsPoseCommand(mod.Command) && pose.HasValue) bookmark.PoseIndex = pose;
-            if (add) { config.Bookmarks.Add(bookmark); config.OverlayVisible = true; Save(); status = T("Добавлено на панель.", "Added to panel."); }
+            if (transfer) PrepareTransferLaunch(bookmark);
+            else if (add) { config.Bookmarks.Add(bookmark); config.OverlayVisible = true; Save(); status = T("Добавлено на панель.", "Added to panel."); }
             else if (pair) BeginPair(bookmark);
             else Play(bookmark);
         }
@@ -1082,7 +1161,7 @@ public sealed partial class Plugin : IDalamudPlugin
         ImGui.InputTextWithHint("##search", T("Поиск по эмоции или моду", "Search emote or mod"), ref search, 120);
         if (ImGui.BeginChild("##emoteList", new Vector2(0, 0), true))
         {
-            var groups = discovered.Where(m => m.Command.Length > 0 && !config.HiddenMods.Contains(m.Directory))
+            var groups = discovered.Where(m => !IsCarrierCopy(m.Directory) && m.Command.Length > 0 && !config.HiddenMods.Contains(m.Directory))
                 .GroupBy(m => m.Directory, StringComparer.OrdinalIgnoreCase)
                 .OrderBy(g => g.First().Name, StringComparer.OrdinalIgnoreCase).ToArray();
             foreach (var folder in config.Folders.Concat([""]))
@@ -1149,16 +1228,13 @@ public sealed partial class Plugin : IDalamudPlugin
                         {
                             ImGui.SameLine();
                             ImGui.TextColored(new Vector4(1f, .65f, .25f, 1f), T("Не разблокирована", "Not unlocked"));
-                            if (ImGui.IsItemHovered()) ImGui.SetTooltip(T("Эта игровая эмоция ещё не открыта у персонажа. Мод не может запустить её одной заменой файлов.",
-                                "This game emote is not unlocked on this character. A file replacement alone cannot play it."));
+                            if (ImGui.IsItemHovered()) ImGui.SetTooltip(T("При обычном запуске плагин автоматически подберёт доступную эмоцию. Оригинал мода не изменится.", "Normal playback automatically selects an unlocked emote. The original mod stays unchanged."));
                         }
                         if (mod.Variants.Length == 0)
                         {
-                            ImGui.BeginDisabled(lockedEmote);
                             if (ImGui.SmallButton(T("Предпросмотр", "Preview"))) Preview(mod, null);
                             ImGui.SameLine();
                             if (ImGui.SmallButton(T("На панель", "Add to panel"))) AddBookmark(mod, null);
-                            ImGui.EndDisabled();
                         }
                         ImGui.EndGroup();
                         if (IsPoseCommand(mod.Command)) DrawPoseSelector(mod);
@@ -1173,11 +1249,9 @@ public sealed partial class Plugin : IDalamudPlugin
                                 foreach (var (variant, variantIndex) in mod.Variants.Select((v, i) => (v, i)))
                                 {
                                     ImGui.PushID(variantIndex);
-                                    ImGui.BeginDisabled(lockedEmote);
                                     if (ImGui.SmallButton(T("Предпросмотр", "Preview"))) Preview(mod, variant);
                                     ImGui.SameLine();
                                     if (ImGui.SmallButton(T("На панель", "Add to panel"))) AddBookmark(mod, variant);
-                                    ImGui.EndDisabled();
                                     ImGui.SameLine();
                                     ImGui.TextUnformatted($"{variant.Group} → {variant.Option}");
                                     ImGui.PopID();
@@ -1223,6 +1297,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private Bookmark CreateBookmark(EmoteMod mod, EmoteVariant? variant)
     {
+        if (!IntegrationLoaded("Penumbra")) throw new InvalidOperationException(T("Penumbra недоступна.", "Penumbra is unavailable."));
         if (Objects.LocalPlayer is not { } player) throw new InvalidOperationException(T("Персонаж не в игре.", "Character is not in game."));
         var (valid, _, collection) = getCollection.Invoke(player.ObjectIndex);
         if (!valid || collection.Id == Guid.Empty) throw new InvalidOperationException(T("Коллекция не найдена.", "Collection not found."));
@@ -1261,7 +1336,7 @@ public sealed partial class Plugin : IDalamudPlugin
             ExecuteEmote("/cpose");
         }
         ImGui.EndDisabled();
-        ImGui.TextWrapped(T("Выбирай позу кнопкой Change pose. Автоматика — экспериментальная настройка.", "Select the pose with Change pose. Automation is an experimental setting."));
+        ImGui.TextWrapped(T("Нужная поза выбирается автоматически. Кнопка «Сменить позу» переключает её вручную.", "The target pose is selected automatically. Use Change pose to cycle manually."));
         if (mod.PoseIndex.HasValue)
         {
             var file = mod.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? "j_pose" : "pose";
@@ -1308,6 +1383,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void DrawPanelTab()
     {
+        DrawPairLibrary();
         if (ImGui.Checkbox(T("Показывать игровую панель", "Show in-game panel"), ref config.OverlayVisible)) Save();
         ImGui.SameLine();
         if (ImGui.Checkbox(T("Закрепить положение", "Lock position"), ref config.OverlayLocked)) Save();
@@ -1339,6 +1415,7 @@ public sealed partial class Plugin : IDalamudPlugin
             if (ImGui.InputText($"##name{i}", ref name, 100)) { b.Name = name; Save(); }
             ImGui.SameLine();
             ImGui.TextDisabled(b.Command);
+            DrawBookmarkTools(b, i);
         }
         ImGui.TextDisabled(T("Каждый значок хранит свой вариант настроек мода. Он не меняется при переключении других эмоций.",
             "Each icon keeps its own mod options. Switching other emotes does not replace them."));
@@ -1370,7 +1447,19 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void DrawHelpTab()
     {
+        if (ImGui.CollapsingHeader(T("Лицензия и исходники", "License and source")))
+        {
+            ImGui.TextUnformatted("Emote Shelf — Copyright (c) 2026 CheesyChiz — AGPL-3.0");
+            ImGui.TextWrapped(T("Без гарантий. Можно использовать, изменять и распространять по условиям AGPL-3.0. Точные исходники этой версии — в SOURCE.zip рядом с плагином; лицензии и авторы — в LICENSE и THIRD-PARTY-NOTICES.md. Используется PAP-модуль NoireLib (Aspher0 и участники), Luna и Penumbra.Api (Ottermandias и участники).",
+                "No warranty. You may use, modify and redistribute under AGPL-3.0. Matching source is in SOURCE.zip beside the plugin; licenses and credits are in LICENSE and THIRD-PARTY-NOTICES.md. Includes the NoireLib PAP module (Aspher0 and contributors), Luna and Penumbra.Api (Ottermandias and contributors)."));
+        }
         ImGui.TextUnformatted(Localization.Runtime(config.Language, "FAQ"));
+        ImGui.TextWrapped(T("При обычном запуске плагин автоматически подберёт доступную эмоцию. Оригинал мода не изменится.", "Normal playback automatically selects an unlocked emote. The original mod stays unchanged."));
+        if (ImGui.CollapsingHeader(T("Наборы, команды и передача модов", "Presets, commands and mod transfers")))
+            ImGui.TextWrapped(T("Сохрани обе роли в «Панели». У анимации выбери передачу с запуском и роль партнёра: пакет соберётся автоматически. Партнёр принимает установку, включение, выравнивание и общий запуск одной кнопкой. Обычный PMP можно передать без запуска. Обоим нужна версия 0.3.8.0 или новее.",
+                "Save both roles on Panel. From an animation, choose transfer with playback and the partner role: packaging is automatic. One acceptance authorizes installation, activation, alignment and a shared start. A plain PMP can be sent without playback. Both clients need 0.3.8.0 or newer."));
+            ImGui.TextWrapped(T("У роли можно сохранить временную подстройку SimpleHeels; после анимации вернётся прежняя, если ты не изменил её вручную. В GPose можно сохранить, применить и отменить позу выбранного актёра через Brio API 3. Общий перезапуск повторяет только ранее принятую анимацию с тем же партнёром; локальный сброс влияет лишь на твой экран. Совпадение музыки и фазы не гарантируется.",
+                "A role can save a temporary SimpleHeels adjustment; the previous one is restored after playback unless you changed it manually. In GPose, save, apply and undo a selected actor's pose through Brio API 3. Shared restart repeats only the previously accepted animation with the same partner; local reset affects only your screen. Matching music and phase are not guaranteed."));
         if (ImGui.CollapsingHeader(T("Как добавить и запустить эмоцию?", "How do I add and play an emote?")))
         {
         ImGui.TextWrapped(T(
@@ -1383,8 +1472,8 @@ public sealed partial class Plugin : IDalamudPlugin
             "Hide is in the … menu to the right of the folder selector. Right-click a panel icon to open its mod."));
         }
         if (ImGui.CollapsingHeader(T("Как работают позы?", "How do poses work?")))
-            ImGui.TextWrapped(T("Слот берётся из файлов мода. Автовыбор включается в настройках; без него нажимай Change pose вручную. /cpose без аргументов переключает следующую позу. Поддержка выбора номера через /cpose N пока не подтверждена.",
-                "The slot comes from the mod files. Enable automatic selection in Settings, or click Change pose manually. Plain /cpose cycles to the next pose. Selecting a numbered pose with /cpose N is not yet verified."));
+            ImGui.TextWrapped(T("Плагин определяет слот позы по файлам мода и выбирает его при запуске. Если в моде несколько слотов, укажи нужный. Кнопка «Сменить позу» и /cpose позволяют переключать позы вручную.",
+                "The plugin reads pose slots from mod files and selects the target when playback starts. If a mod has several slots, choose the one you want. Change pose and /cpose still let you cycle manually."));
         if (ImGui.CollapsingHeader(T("Как запускать анимации вдвоём?", "How do I play with a partner?"))) DrawPairHelp();
         if (ImGui.CollapsingHeader(T("Как настроить панель и уведомления?", "How do I position the panel and notifications?")))
             ImGui.TextWrapped(T("Во вкладке «Панель» открепи панель и перетащи её. Над чатом включи рост вверх, справа экрана — влево. Для одной колонки выбери 1 значок в строке. Положение парного уведомления меняется в настройках пары через предпросмотр.",
@@ -1396,9 +1485,8 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void DrawAdvancedTab()
     {
+        DrawDependencies();
         if (ImGui.CollapsingHeader(T("Обязательная диагностика", "Required diagnostics"))) DrawReportSettings();
-        if (ImGui.Checkbox(T("Автовыбор позы (экспериментально, недостаточно протестировано)", "Automatic pose selection (experimental, not fully tested)"), ref config.AutomaticPose))
-        { pendingPoseIndex = -1; Save(); }
         DrawPairSettings();
         var languages = new[] { ("ru", "Русский"), ("en", "English"), ("ja", "日本語"), ("de", "Deutsch"), ("fr", "Français") };
         var selectedLanguage = languages.FirstOrDefault(x => x.Item1 == config.Language).Item2 ?? "Русский";
@@ -1416,10 +1504,7 @@ public sealed partial class Plugin : IDalamudPlugin
         }
         if (ImGui.Button(T("Сбросить временное переключение", "Clear temporary selection")))
         {
-            CancelPair();
-            try { if (activeCollection != Guid.Empty) removeTemporary.Invoke(activeCollection, TemporaryKey); status = T("Временные настройки сняты.", "Temporary settings cleared."); }
-            catch (Exception ex) { status = ex.Message; }
-            activeCollection = Guid.Empty;
+            RestoreShelfSelection();
         }
         if (config.HiddenMods.Count > 0 && ImGui.TreeNode($"{T("Скрытые моды", "Hidden mods")} ({config.HiddenMods.Count})###hidden"))
         {
@@ -1433,7 +1518,7 @@ public sealed partial class Plugin : IDalamudPlugin
             }
             ImGui.TreePop();
         }
-        var unknown = discovered.Where(m => m.Command.Length == 0 && !config.HiddenMods.Contains(m.Directory)).ToArray();
+        var unknown = discovered.Where(m => !IsCarrierCopy(m.Directory) && m.Command.Length == 0 && !config.HiddenMods.Contains(m.Directory)).ToArray();
         if (unknown.Length > 0 && ImGui.TreeNode($"{T("Неопознанные моды", "Unrecognized mods")} ({unknown.Length})###unknown"))
         {
         ImGui.TextDisabled(T("Укажи известную игровую команду эмоции.", "Enter a known game emote command."));
@@ -1468,6 +1553,8 @@ public sealed partial class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        RestoreOffset();
+        CancelCarrierPlayback();
         errorReports.Dispose();
         ContextMenus.OnMenuOpened -= OnPairContextMenu;
         StopLink();

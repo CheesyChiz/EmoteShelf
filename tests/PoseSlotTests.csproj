@@ -6,6 +6,17 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../LibraryCommands.cs" Link="LibraryCommands.cs" />
+    <Compile Include="../ModPackage.cs" Link="ModPackage.cs" />
+    <Compile Include="../TransferClient.cs" Link="TransferClient.cs" />
+    <Compile Include="../TransferLaunch.cs" Link="TransferLaunch.cs" />
+    <Compile Include="../SoundRestart.cs" Link="SoundRestart.cs" />
+    <Compile Include="../CarrierConversion.cs" Link="CarrierConversion.cs" />
+    <Compile Include="../CarrierRequestGate.cs" Link="CarrierRequestGate.cs" />
+    <Compile Include="../PositionOffset.cs" Link="PositionOffset.cs" />
+    <Compile Include="../NoireLoggerAdapter.cs" Link="NoireLoggerAdapter.cs" />
+    <Compile Include="../third_party/NoireLib/PapFormat/**/*.cs" LinkBase="NoirePap" />
+    <Compile Include="../BookmarkValidation.cs" Link="BookmarkValidation.cs" />
     <Compile Include="../Localization.cs" Link="Localization.cs" />
     <Compile Include="../Localization.Extra.cs" Link="Localization.Extra.cs" />
     <Compile Include="../Localization.Runtime.cs" Link="Localization.Runtime.cs" />

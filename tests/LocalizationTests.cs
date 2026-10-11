@@ -17,9 +17,14 @@ internal static class LocalizationTests
                 if (string.IsNullOrWhiteSpace(text) || Slots(key) != Slots(text))
                     throw new Exception("Missing translation or mismatched format placeholders: " + key);
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../"));
+        var configuration = File.ReadAllText(Path.Combine(root, "Configuration.cs"));
+        if (configuration.Contains("AutomaticPose") || configuration.Contains("ManualPoseMigration"))
+            throw new Exception("Retired automatic-pose preferences must not override always-on playback.");
         foreach (var path in Directory.GetFiles(root, "Plugin*.cs"))
         {
             var source = File.ReadAllText(path);
+            if (source.Contains("config.AutomaticPose"))
+                throw new Exception("Playback still depends on the retired pose toggle: " + path);
             foreach (Match match in Regex.Matches(source, "\\bT\\(\"(?:[^\"\\\\]|\\\\.)*\",\\s*\"((?:[^\"\\\\]|\\\\.)*)\"\\)"))
             {
                 var key = System.Text.Json.JsonSerializer.Deserialize<string>("\"" + match.Groups[1].Value + "\"")!;

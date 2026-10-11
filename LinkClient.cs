@@ -12,7 +12,7 @@ public sealed record LaunchOffer(
     [property: JsonPropertyName("family")] string Family,
     [property: JsonPropertyName("command")] string Command,
     [property: JsonPropertyName("role")] string Role);
-public sealed record LaunchInvitation(LaunchOffer Offer, bool Incoming, string Status, int Remaining);
+public sealed record LaunchInvitation(LaunchOffer Offer, bool Incoming, string Status, int Remaining, string Previous = "");
 public sealed record LinkSnapshot(string State, string Partner, string Invitation, int Remaining, long ReceivedAt, string Error = "", LaunchInvitation? Launch = null);
 
 // Only immutable snapshots cross into the framework/UI thread.
@@ -25,6 +25,8 @@ public sealed class LinkClient : IDisposable
     public LinkSnapshot Snapshot => Volatile.Read(ref snapshot);
     public Task Completion { get; }
     public string Identity { get; }
+    private string? transferCapability;
+    internal string? TransferCapability => Volatile.Read(ref transferCapability);
     private readonly ConcurrentQueue<string> diagnostics = new();
     public volatile bool DiagnosticEnabled;
     public string LastIssue => Volatile.Read(ref lastIssue);
@@ -71,6 +73,7 @@ public sealed class LinkClient : IDisposable
             if (token is null || token.Length != 43 || token.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-' && c != '_'))
                 throw new InvalidOperationException("Invalid relay response");
             Trace("register accepted");
+            Volatile.Write(ref transferCapability, token);
             var previousState = "";
             while (!stop.IsCancellationRequested)
             {
@@ -101,7 +104,9 @@ public sealed class LinkClient : IDisposable
                         throw new InvalidOperationException("Invalid offer");
                     var launchState = raw.GetProperty("status").GetString() ?? "";
                     if (launchState is not ("waiting" or "accepted") || state != "linked") throw new InvalidOperationException("Invalid proposal state");
-                    launch = new(offer, raw.GetProperty("incoming").GetBoolean(), launchState, raw.GetProperty("remaining").GetInt32());
+                    var previous = raw.TryGetProperty("previous", out var prior) ? prior.GetString() ?? "" : "";
+                    if (previous.Length != 0 && (previous.Length != 64 || !previous.All(char.IsAsciiHexDigit))) throw new InvalidOperationException("Invalid restart");
+                    launch = new(offer, raw.GetProperty("incoming").GetBoolean(), launchState, raw.GetProperty("remaining").GetInt32(), previous);
                 }
                 Volatile.Write(ref snapshot, new(state, partner, data.GetProperty("invitation").GetString() ?? "",
                     data.GetProperty("remaining").GetInt32(), Environment.TickCount64, error, launch));
@@ -124,6 +129,7 @@ public sealed class LinkClient : IDisposable
         }
         finally
         {
+            Volatile.Write(ref transferCapability, null);
             if (token is not null)
                 try { using var cleanup = new CancellationTokenSource(2000); await Send("v2/link", token, new { action = "close", target = "", invitation = "" }, cleanup.Token); } catch { }
             http.Dispose();

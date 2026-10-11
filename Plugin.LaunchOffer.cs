@@ -49,7 +49,7 @@ public sealed partial class Plugin
         var pose = IsPoseCommand(mod.Command)
             ? PoseSlot.FromPaths(active.SelectMany(v => v.Paths), mod.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? "j_" : "") ?? draft.PoseIndex
             : draft.PoseIndex;
-        return new Bookmark { ModDirectory = draft.ModDirectory, Command = draft.Command, IconId = draft.IconId, PoseIndex = pose,
+        return new Bookmark { ModDirectory = draft.ModDirectory, Command = draft.Command, IconId = draft.IconId, PoseIndex = pose, Offset = draft.Offset,
             Name = $"{mod.Name} — {mod.EmoteName} — " + string.Join("; ", active.Select(v => $"{v.Group}: {v.Option}")),
             SavedOptions = draft.SavedOptions!.ToDictionary(p => p.Key, p => p.Value.ToList()) };
     }
@@ -61,7 +61,7 @@ public sealed partial class Plugin
             offerEditorId = request.Offer.Id;
             offerEditorError = "";
             offerDraft = null;
-            offerMods = discovered.Where(m => PairRules.Family(m.Name) == request.Offer.Family).ToArray();
+            offerMods = discovered.Where(m => !IsCarrierCopy(m.Directory) && PairRules.Family(m.Name) == request.Offer.Family).ToArray();
             // A different emote is a suggestion, not proof of a semantic role.
             var alternatives = offerMods.Select((m, i) => (m, i)).Where(x => PairRules.Hash(x.m.Command.ToLowerInvariant()) != request.Offer.Command).ToArray();
             if (offerMods.Length > 0) SelectOfferMod(alternatives.Length == 1 ? alternatives[0].i : 0);
@@ -92,6 +92,8 @@ public sealed partial class Plugin
                 ImGui.EndCombo();
             }
             var mod = offerMods[offerModIndex];
+            DrawSavedOfferRoles(request);
+            mod = offerMods[offerModIndex];
             if (offerDraft is not null)
             {
                 if (ImGui.BeginChild("offerOptions", new System.Numerics.Vector2(0, 180)))
