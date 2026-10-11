@@ -6,8 +6,9 @@ namespace EmoteShelf;
 
 internal static class ModPackage
 {
-    internal const int MaxCompressed = 32 * 1024 * 1024;
-    internal const int MaxExpanded = 128 * 1024 * 1024;
+    internal const int MaxCompressed = 128 * 1024 * 1024;
+    internal const int MaxExpanded = 512 * 1024 * 1024;
+    internal const int MaxAsset = 128 * 1024 * 1024;
     internal static string DisplayFileName(string name)
     {
         var clean = new string(name.Where(c => !char.IsControl(c) && !"/\\:*?\"<>|".Contains(c)).ToArray()).Trim();
@@ -53,7 +54,7 @@ internal static class ModPackage
             }
             using var input = File.OpenRead(path);
             var size = input.Length;
-            if (size > 64 * 1024 * 1024 || (total += size) > MaxExpanded ||
+            if (size > MaxAsset || (total += size) > MaxExpanded ||
                 relative.EndsWith(".json", StringComparison.OrdinalIgnoreCase) && size > 2 * 1024 * 1024)
                 throw new InvalidDataException("package_size");
             var bytes = new byte[(int)size]; input.ReadExactly(bytes);
@@ -107,7 +108,7 @@ internal static class ModPackage
             var path = SafePath(entry.FullName);
             if (!files.Add(path) || !Extensions.Contains(Path.GetExtension(path))) throw new InvalidDataException("package_file_type");
             total += entry.Length;
-            if (entry.Length > 64 * 1024 * 1024 || total > MaxExpanded) throw new InvalidDataException("package_expansion");
+            if (entry.Length > MaxAsset || total > MaxExpanded) throw new InvalidDataException("package_expansion");
             using var contents = entry.Open();
             var buffer = new byte[65536]; long read = 0; int count;
             while ((count = contents.Read(buffer)) > 0)

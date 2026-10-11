@@ -7,6 +7,14 @@ from transfers import Transfers
 
 
 class TransferTests(unittest.TestCase):
+    def test_128_mib_package_boundary(self):
+        self.assertEqual(self.store.MAX_PACKAGE, 128 * 1024 * 1024)
+        with self.assertRaises(ValueError):
+            self.act(self.a, **dict(self.offer, size=self.store.MAX_PACKAGE + 1))
+        result = self.act(self.a, **dict(self.offer, size=self.store.MAX_PACKAGE))
+        self.assertEqual(result['transfer']['size'], self.store.MAX_PACKAGE)
+        self.act(self.a, action='cancel', id=result['transfer']['id'])
+
     def test_transfer_shared_dance_keeps_mode_and_same_command(self):
         for user in (self.a, self.b): self.links.users[user]['dance'] = True
         self.store.action(self.links, self.b, dict(action='poll'), protocol=5)

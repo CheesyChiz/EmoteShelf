@@ -346,8 +346,8 @@ public sealed partial class Plugin
         }
         ImGui.EndDisabled();
         if (transferManualPackage)
-        ImGui.TextWrapped(T("Экспортируй нужный мод в PMP через Penumbra и укажи файл ниже. До 32 МиБ; сервер удаляет пакет через 10 минут или при разрыве пары. Это передача копии мода, не синхронизация Lightless.",
-            "Export the mod as a PMP in Penumbra and select its path below. Up to 32 MiB; the server removes it after 10 minutes or unlinking. This sends a copy, not Lightless synchronization."));
+        ImGui.TextWrapped(T("Выбери локальный PMP через «Обзор». До 128 МиБ; сервер удаляет пакет через 10 минут или при разрыве пары. Это передача копии, не синхронизация Lightless.",
+            "Browse for a local PMP. Up to 128 MiB; the server removes it after 10 minutes or unlinking. This sends a copy, not Lightless synchronization."));
         if (config.TransferNoticeVersion != 1)
         {
             ImGui.TextWrapped(T("Отправляй только моды, которые имеешь право распространять. Сервер получит пакет и его название, а партнёр — копию после принятия. Проверка архива не гарантирует безопасность содержимого.",

@@ -27,6 +27,21 @@ internal static class ModPackageTests
     }
     internal static void Run()
     {
+        if (ModPackage.MaxCompressed != 128 * 1024 * 1024 || ModPackage.MaxExpanded != 512 * 1024 * 1024)
+            throw new Exception("Package limits disagree with 128 MiB transfer policy");
+        using (var large = new MemoryStream())
+        {
+            using (var zip = new ZipArchive(large, ZipArchiveMode.Create, true))
+            {
+                using (var meta = new StreamWriter(zip.CreateEntry("meta.json").Open())) meta.Write("{\"Name\":\"Large test\",\"FileVersion\":3}");
+                using var asset = zip.CreateEntry("large.pap", CompressionLevel.NoCompression).Open();
+                var block = new byte[1024 * 1024];
+                for (var i = 0; i < 33; i++) asset.Write(block);
+            }
+            ModPackage.Validate(large.ToArray());
+        }
+        try { ModPackage.Validate(new byte[ModPackage.MaxCompressed + 1]); throw new Exception("Oversized archive accepted"); }
+        catch (InvalidDataException ex) when (ex.Message == "package_size") { }
         ModPackage.Validate(Package());
         ModPackage.Validate(Package("face.kdb"));
         foreach (var bad in new[] { "../evil.pap", "C:/evil.pap", "x:stream.pap", "CON.pap", "x./evil.pap", "run.dll", "run.ps1", "x\\..\\evil.tex", "a//b.tex" })

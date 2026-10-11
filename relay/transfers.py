@@ -8,7 +8,7 @@ import json
 
 
 class Transfers:
-    MAX_PACKAGE = 32 * 1024 * 1024
+    MAX_PACKAGE = 128 * 1024 * 1024
     MAX_TOTAL = 128 * 1024 * 1024
     CHUNK = 256 * 1024
     TTL = 600
