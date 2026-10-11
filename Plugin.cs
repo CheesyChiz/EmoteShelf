@@ -486,6 +486,8 @@ public sealed partial class Plugin : IDalamudPlugin
                 if (pairSession is not null && pairPreparing)
                 {
                     pairHeldCommand = command;
+                    // An agreed restart is already playing the accepted resources.
+                    if (!pairRestart) BeginPairWarmup();
                     pairPreparing = false;
                     pairConfirmUntil = Environment.TickCount64 + 5000;
                     // UpdatePair confirms position/facing after redraw before readiness.
@@ -495,7 +497,7 @@ public sealed partial class Plugin : IDalamudPlugin
             catch (Exception ex)
             {
                 pairCheckpoint = "prepare_validation";
-                CancelPair(T("Проверка подготовленного мода не пройдена.", "Prepared mod validation failed."));
+                CancelPair(T("Проверка подготовленного мода не пройдена.", "Prepared mod validation failed.") + "\n" + ex.Message);
                 pendingPoseIndex = -1;
                 status = string.Format(T("Мод переключен, но эмоция не запустилась: {0}", "Mod switched, but the emote did not start: {0}"), ex.Message);
                 Log.Warning(ex, "Emote failed");

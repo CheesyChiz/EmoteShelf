@@ -12,6 +12,7 @@ internal static partial class Localization
         }
     }
     private const string Additional = """
+Loading animation for synchronization…|同期用のアニメーションを読み込み中…|Animation für die Synchronisierung wird geladen…|Chargement de l’animation pour la synchronisation…
 Use a local PMP file|ローカルPMPファイルを使用|Lokale PMP-Datei verwenden|Utiliser un fichier PMP local
 PMP is a Penumbra archive. You can send it without installing it yourself. To send an installed mod, turn this mode off and use the mod list.|PMPはPenumbraのアーカイブです。自分でインストールせずに送信できます。インストール済みMODを送信するには、このモードを無効にしてMOD一覧を使ってください。|PMP ist ein Penumbra-Archiv. Es kann ohne eigene Installation gesendet werden. Für installierte Mods diesen Modus ausschalten und die Mod-Liste verwenden.|PMP est une archive Penumbra. Vous pouvez l’envoyer sans l’installer. Pour envoyer un mod installé, désactivez ce mode et utilisez la liste des mods.
 Browse…|参照…|Durchsuchen…|Parcourir…

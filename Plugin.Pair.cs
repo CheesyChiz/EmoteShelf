@@ -226,6 +226,7 @@ public sealed partial class Plugin
 
     private void CancelPair(string? reason = null, bool failure = true)
     {
+        CancelPairWarmup();
         CancelCarrierPlayback();
         RestoreOffset();
         if (pairSession is not null && reason is not null && failure)
@@ -358,6 +359,12 @@ public sealed partial class Plugin
             {
                 if (!pairPreparing && pairHeldCommand.Length > 0 && !pairReadySent)
                 {
+                    if (pairWarmup.Active)
+                    {
+                        pairWarmup.Tick(now, PlayWarmupTimeline);
+                        pairMessage = T("Загружаю анимацию для синхронизации…", "Loading animation for synchronization…");
+                        return;
+                    }
                     pairCheckpoint = "resource_verification";
                     if (!PairResourcesReady())
                     {

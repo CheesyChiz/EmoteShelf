@@ -122,7 +122,7 @@ public sealed partial class Plugin
             }
             if (observation.Peer is { Assets.Length: > 0 } other && peerHashes is null && now >= nextResourceCheck && pairSession is not null)
             {
-                nextResourceCheck = now + 1000;
+                nextResourceCheck = now + (peerResourcesVerified ? 1000 : 250);
                 if (!ResourceProof.Equal(checkingPeer, other.Assets)) peerResourcesVerified = false;
                 checkingPeer = other.Assets;
                 var files = ResolveResources(other.Assets.Select(a => a.Path), partner.ObjectIndex);
