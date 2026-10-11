@@ -10,12 +10,28 @@ from contextlib import contextmanager
 STATES = {'none', 'connecting', 'idle', 'incoming', 'outgoing', 'linked', 'error'}
 CODES = {'connection_failed', 'request_rejected', 'alignment_failed', 'launch_cancelled', 'lightless_api', 'invite_blocked'}
 DETAILS = {'unstable', 'input', 'timeout', 'height', 'state', 'lightless_missing', 'not_connected', 'connection_error', 'stale', 'pending', 'already_linked', 'lightless_api', 'lightless_unhandled', 'unknown'}
+DETAILS |= {'preflight', 'deadline', 'partner_identity', 'lightless_check', 'actor_state',
+            'pose_setting', 'pair_transport', 'heartbeat', 'proposal', 'alignment',
+            'local_movement', 'alignment_consent', 'partner_movement', 'prepare_mod',
+            'post_prepare_alignment', 'prepared_action', 'start_deadline', 'validate_mod',
+            'final_alignment', 'dispatch', 'prepare_validation', 'stand_up'}
 
 
 def validate(data):
     fields = {'id', 'version', 'attempt', 'code', 'detail', 'state', 'fresh', 'lightless', 'distance', 'angle'}
-    if not isinstance(data, dict) or set(data) != fields:
+    if not isinstance(data, dict) or set(data) not in (fields, fields | {'context'}):
         raise ValueError('schema')
+    if 'context' in data:
+        context = data['context']
+        flags = {'Anchor', 'AlignStarted', 'PreparationStarted', 'Preparing', 'Ready'}
+        if not isinstance(context, dict) or set(context) != flags | {'PairState', 'StableFrames'}:
+            raise ValueError('context schema')
+        if context['PairState'] not in {'none', 'connecting', 'waiting', 'paired', 'scheduled', 'error'}:
+            raise ValueError('pair state')
+        if any(type(context[key]) is not bool for key in flags):
+            raise ValueError('context flags')
+        if type(context['StableFrames']) is not int or not 0 <= context['StableFrames'] <= 1000:
+            raise ValueError('stable frames')
     if not isinstance(data['id'], str) or not re.fullmatch('[0-9a-f]{32}', data['id']):
         raise ValueError('id')
     if not isinstance(data['version'], str) or not re.fullmatch(r'\d{1,3}(\.\d{1,3}){3}', data['version']):

@@ -24,7 +24,8 @@ public sealed class Configuration : IPluginConfiguration
     public bool ManualPoseMigration;
     public bool PairEnabled;
     public bool PairDebug;
-    public bool UploadErrorReports;
+    // Old optional-upload preference does not acknowledge the new mandatory policy.
+    public int DiagnosticsNoticeVersion;
     public float PairNoticeX = -1;
     public float PairNoticeY = -1;
     public HashSet<string> ClosedFolders = new(StringComparer.OrdinalIgnoreCase);

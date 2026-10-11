@@ -18,7 +18,8 @@ internal sealed unsafe class PairAlignment : IDisposable
     private long lastProgress;
     private float bestDistance;
     private bool correcting;
-    private int correctionFrames, stableFrames;
+    private bool finalCorrection;
+    private int correctionFrames, stableFrames, acceptableFrames;
     private readonly List<string> samples = [];
     private long started;
     public string Diagnostics => string.Join(" | ", samples);
@@ -26,7 +27,7 @@ internal sealed unsafe class PairAlignment : IDisposable
     // Bounded, relative-only samples: no actor names, world coordinates or network tokens.
     private void Sample(string phase)
     {
-        if (samples.Count >= 32) return;
+        if (samples.Count >= 32) samples.RemoveAt(1); // Preserve begin and the latest confirmation/failure.
         if (objects.LocalPlayer is not { } player) { samples.Add(phase + ": no actor"); return; }
         var delta = destination - player.Position;
         var mode = ((Character*)player.Address)->Mode;
@@ -56,10 +57,21 @@ internal sealed unsafe class PairAlignment : IDisposable
         Error = "";
         Active = true;
         correcting = false;
-        correctionFrames = stableFrames = 0;
+        finalCorrection = false;
+        correctionFrames = stableFrames = acceptableFrames = 0;
         started = Environment.TickCount64;
         samples.Clear();
         Sample("begin");
+    }
+
+    public void BeginFinalCorrection(Vector3 point, float rotation)
+    {
+        if (objects.LocalPlayer is not { } player || !PairRules.CanFineCorrect(player.Position, point, rotation))
+            throw new InvalidOperationException("Final correction exceeds 0.10 yalms or has invalid coordinates.");
+        Begin(point, rotation);
+        finalCorrection = correcting = true;
+        expires = started + 1200;
+        Sample("post-prepare-refinement");
     }
 
     public void Cancel() { if (Active) Sample("cancel"); Active = false; Arrived = false; correcting = false; }
@@ -69,15 +81,25 @@ internal sealed unsafe class PairAlignment : IDisposable
     public void Update()
     {
         if (!Active || !correcting) return;
-        if (objects.LocalPlayer is not { } player || Environment.TickCount64 >= expires)
+        if (objects.LocalPlayer is not { } player)
         { Fail("Alignment confirmation timed out."); return; }
         var character = (Character*)player.Address;
         Sample("before");
-        if (character->Mode != CharacterModes.Normal || Vector3.Distance(player.Position, destination) > .05f)
+        if (character->Mode != CharacterModes.Normal || Vector3.Distance(player.Position, destination) > (finalCorrection ? PairRules.FinalCorrectionLimit : .05f))
         { Fail("Fine alignment cancelled: character moved or changed state."); return; }
         stableFrames = PairRules.Aligned(player.Position, player.Rotation, destination, facing) ? stableFrames + 1 : 0;
-        if (stableFrames >= 3) { Sample("arrived"); Active = false; Arrived = true; return; }
-        if (++correctionFrames > 12) { Fail("Position/facing did not stabilize; pair launch cancelled."); return; }
+        acceptableFrames = PairRules.ReadyToLaunch(player.Position, player.Rotation, destination, facing) ? acceptableFrames + 1 : 0;
+        if (Environment.TickCount64 >= expires)
+        {
+            if (finalCorrection && acceptableFrames >= 3)
+            { Sample("arrived-within-launch-tolerance"); Active = false; Arrived = true; return; }
+            Fail("Alignment confirmation timed out."); return;
+        }
+        // Hold the exact transform briefly after redraw, then observe it on subsequent frames.
+        // The peer still independently verifies its own view; this is not a network acknowledgement.
+        if (stableFrames >= 3 && (!finalCorrection || Environment.TickCount64 - started >= 350))
+        { Sample("arrived"); Active = false; Arrived = true; return; }
+        if (++correctionFrames > 12 && !finalCorrection) { Fail("Position/facing did not stabilize; pair launch cancelled."); return; }
         character->GameObject.SetPosition(destination.X, destination.Y, destination.Z);
         character->GameObject.SetRotation(facing);
         Sample("after");

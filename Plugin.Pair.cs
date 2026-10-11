@@ -26,6 +26,51 @@ public sealed partial class Plugin
     private bool pairUntargetedPlayback;
     private int pairStableFrames;
     private bool pairReadySent;
+    private string lastLaunchFailure = "";
+
+    private string ExplainPairFailure(string reason)
+    {
+        var advice = pairCheckpoint switch
+        {
+            "alignment" or "post_prepare_alignment" or "final_alignment" => T(
+                "Не подтверждено выравнивание. Встаньте рядом на ровном месте и не двигайтесь до запуска.",
+                "Alignment was not confirmed. Stand nearby on level ground and stay still until playback."),
+            "local_movement" or "partner_movement" => T("Кто-то сдвинулся или повернулся. Остановитесь и повторите запуск.",
+                "A player moved or turned. Stop moving and retry."),
+            "prepare_mod" or "prepare_validation" or "validate_mod" => T("Проверьте выбранные варианты в Penumbra и дождитесь синхронизации Lightless.",
+                "Check the selected Penumbra options and wait for Lightless synchronization."),
+            "pair_transport" => T("Согласование запуска прервано; подробная причина от партнёра не получена этим клиентом. Возможны потеря связи, закрытие или зависание игры. Это не подтверждённый диагноз; серверные отчёты сопоставляются по ID попытки.",
+                "Launch coordination ended; this client did not receive the partner's detailed reason. Connection loss, game exit or a stalled game are possible, not confirmed. Server reports are correlated by attempt ID."),
+            "heartbeat" or "start_deadline" => T("Ответ сервера или сигнал старта задержался. Повторите запуск; при повторении переподключите пару.",
+                "The relay response or start signal was late. Retry; reconnect the pair if it repeats."),
+            "partner_identity" => T("Подключённый партнёр не найден рядом. Проверьте мир, зону и соединение пары.",
+                "The linked partner is not visible nearby. Check world, zone and pair connection."),
+            "actor_state" => T("Оба должны стоять рядом, вне боя, без маунта и каста.",
+                "Both players must stand nearby, out of combat, unmounted and not casting."),
+            "lightless_check" => T("Дождитесь синхронизации с партнёром в Lightless.", "Wait for Lightless synchronization with your partner."),
+            "proposal" or "deadline" => T("Предложение больше не активно. Отправьте новое и дождитесь принятия.",
+                "The proposal is no longer active. Send a new one and wait for acceptance."),
+            _ => T("Проверьте условие выше. Если сбой повторяется, скопируйте диагностику в настройках.",
+                "Check the condition above. If it repeats, copy diagnostics from Settings.")
+        };
+        var measurements = "";
+        if (pairCheckpoint is "alignment" or "post_prepare_alignment" or "final_alignment" &&
+            Objects.LocalPlayer is { } local && LinkedPartner is { } peer)
+            measurements = string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                T("\nРасстояние: {0:F4} ялма (допуск ≤0,1); угол: {1:F2}° (допуск ≤0,57°).",
+                  "\nDistance: {0:F4} yalms (limit ≤0.1); angle: {1:F2}° (limit ≤0.57°)."),
+                Vector3.Distance(local.Position, peer.Position), PairRules.AngleDistance(local.Rotation, peer.Rotation) * 180 / MathF.PI);
+        return Localization.Runtime(config.Language, reason) + measurements + "\n" + advice;
+    }
+    private bool pairRefining, pairRefined;
+    private long pairRefineSettledAt;
+    private string pairCheckpoint = "preflight", lastPairStage = "";
+    private void PairStage(string stage)
+    {
+        if (stage == lastPairStage) return;
+        lastPairStage = stage;
+        PairDebug($"attempt={pairOfferId} stage={stage}", true);
+    }
     private long pairConfirmUntil;
     private long pairDeadline;
     private string pairCollectionWarning = "";
@@ -98,6 +143,8 @@ public sealed partial class Plugin
     private void BeginPairCore(Bookmark bookmark, string offerId)
     {
         CancelPair();
+        pairCheckpoint = "preflight";
+        lastPairStage = "";
         pairCollectionWarning = "";
         try
         {
@@ -144,7 +191,13 @@ public sealed partial class Plugin
             pairSession = new(pairSelf, pairOther, PairRules.Hash(PairRules.Family(mod.Name) + offerId), true);
             pairMessage = T("Отправлено предложение анимации. Партнёр выбирает роль в уведомлении и подтверждает запуск.", "Animation proposed. Your partner chooses a role in the notification and accepts the launch.");
         }
-        catch (Exception ex) { CancelPair(ex.Message); }
+        catch (Exception ex)
+        {
+            lastPairFailure = $"attempt={offerId} launch rejected checkpoint={pairCheckpoint} exception={ex.GetType().Name}";
+            PairDebug(lastPairFailure, true);
+            ReportPairError("launch_cancelled");
+            CancelPair(ex.Message);
+        }
     }
 
     private void BeginPair(EmoteMod mod)
@@ -153,11 +206,17 @@ public sealed partial class Plugin
         catch (Exception ex) { CancelPair(ex.Message); }
     }
 
-    private void CancelPair(string? reason = null)
+    private void CancelPair(string? reason = null, bool failure = true)
     {
-        if (pairSession is not null && reason is not null)
+        if (pairSession is not null && reason is not null && failure)
             ReportPairError(pairAlignStarted && pairAlignment?.Error.Length > 0 ? "alignment_failed" : "launch_cancelled");
         if (pairSession is not null) LogPairDiagnostics(reason ?? "Local cancellation");
+        if (reason is not null && failure)
+        {
+            // Keep the actionable explanation visible until dismissed, even after disconnect.
+            lastLaunchFailure = ExplainPairFailure(reason);
+            reason = lastLaunchFailure;
+        }
         pairUntargetedPlayback = false;
         if (pairOfferId.Length > 0) link?.Act("cancel_launch", invitation: pairOfferId);
         pairOfferId = "";
@@ -176,12 +235,15 @@ public sealed partial class Plugin
         pairHeldCommand = "";
         pairPreparing = pairStartedPreparation = pairAlignStarted = false;
         pairReadySent = false;
+        pairRefining = pairRefined = false;
+        pairRefineSettledAt = 0;
         pairStableFrames = 0;
         if (reason is not null) { pairMessage = reason; status = reason; pairNoticeUntil = Environment.TickCount64 + 8000; }
     }
 
     private void LogPairDiagnostics(string outcome)
     {
+        outcome = Localization.English(outcome);
         var now = Environment.TickCount64;
         var snapshot = pairSession?.Snapshot;
         var local = Objects.LocalPlayer;
@@ -191,6 +253,10 @@ public sealed partial class Plugin
             : "actor unavailable";
         // The proposal identifier is not a bearer credential. Its short prefix correlates both clients.
         var attempt = pairOfferId.Length >= 8 ? pairOfferId[..8] : "none";
+        // Closed diagnostic context, not arbitrary exception text (which may contain paths).
+        var diagnostic = $"attempt={pairOfferId} result={(outcome == "Dispatched" ? "dispatched" : "cancelled")} checkpoint={pairCheckpoint} stage={lastPairStage} state={snapshot?.State} anchor={snapshot?.Anchor} ageMs={now - (snapshot?.ReceivedAt ?? now)} alignStarted={pairAlignStarted} preparing={pairPreparing} ready={pairReadySent} stable={pairStableFrames}; {geometry}; correction={(pairAlignStarted ? pairAlignment?.Diagnostics : "not started")}";
+        if (outcome != "Dispatched") lastPairFailure = diagnostic;
+        PairDebug(diagnostic, true);
         Log.Information($"Pair diagnostic v{typeof(Plugin).Assembly.GetName().Version} attempt={attempt} outcome={outcome}; state={snapshot?.State} anchor={snapshot?.Anchor} ageMs={now - (snapshot?.ReceivedAt ?? now)} alignStarted={pairAlignStarted} preparationStarted={pairStartedPreparation} preparing={pairPreparing} ready={pairReadySent} stable={pairStableFrames}; {geometry}; correction={(pairAlignStarted ? pairAlignment?.Diagnostics : "not started")}");
     }
 
@@ -201,37 +267,53 @@ public sealed partial class Plugin
         {
             var now = Environment.TickCount64;
             var snapshot = pairSession.Snapshot;
+            PairStage($"{snapshot.State}/align={pairAlignStarted}/prepare={pairStartedPreparation}/held={pairHeldCommand.Length > 0}/ready={pairReadySent}");
+            while (pairSession.TryReadDiagnostic(out var networkEvent)) PairDebug($"attempt={pairOfferId} {networkEvent}", true);
+            pairCheckpoint = "deadline";
             if (!config.PairEnabled || now >= pairDeadline) throw new InvalidOperationException(T("Ожидание пары отменено или истекло.", "Pair launch cancelled or timed out."));
+            pairCheckpoint = "partner_identity";
             if (Objects.LocalPlayer is not { } local || LinkedPartner is not { } target ||
                 target.GameObjectId != pairTargetId ||
                 PairIdentity(local) != pairSelf || PairIdentity(target) != pairOther)
                 throw new InvalidOperationException(T("Пара отменена: подключённый партнёр не найден рядом, сменился персонаж или зона. Таргет не требуется.", "Pair cancelled: linked partner is not visible, or character/world/zone changed. A target is not required."));
+            pairCheckpoint = "lightless_check";
             if (!LightlessHandles(target.Address)) throw new InvalidOperationException(T("Lightless больше не обрабатывает партнёра; запуск отменён.", "Lightless no longer handles the partner; launch cancelled."));
+            pairCheckpoint = "actor_state";
             if (!CanPair(local) || (!CanPair(target) && !PairRules.PeerMayHaveStarted(snapshot.State, snapshot.StartAt, now)) ||
                 target.IsDead || !PairRules.Nearby(local.Position, target.Position))
                 throw new InvalidOperationException(T("Пара отменена: движение, состояние или расстояние не подходят.", "Pair cancelled: character state or distance is unsuitable."));
+            pairCheckpoint = "pose_setting";
             if (pairBookmark is not null && IsPoseCommand(pairBookmark.Command) && !config.AutomaticPose)
                 throw new InvalidOperationException(T("Автовыбор поз отключён; общий запуск отменён.", "Automatic poses disabled; pair launch cancelled."));
+            pairCheckpoint = "pair_transport";
             if (snapshot.State == "error") throw new InvalidOperationException(snapshot.Error);
+            pairCheckpoint = "heartbeat";
             if (now - snapshot.ReceivedAt > 4000) throw new InvalidOperationException(T("Сервер не отвечает; запуск отменён.", "Relay stopped responding; launch cancelled."));
             var proposal = link?.Snapshot.Launch;
+            pairCheckpoint = "proposal";
             if (proposal?.Offer.Id == pairOfferId) pairOfferSeen = true;
             else if (pairOfferSeen || now - pairOfferQueuedAt > 5000)
                 throw new InvalidOperationException(T("Предложение отклонено, отменено или истекло.", "Animation proposal declined, cancelled or expired."));
             if (proposal?.Offer.Id != pairOfferId || proposal.Status != "accepted") return;
+            pairCheckpoint = "alignment";
             if (pairAlignment?.Error.Length > 0 && pairAlignStarted) throw new InvalidOperationException(pairAlignment.Error);
-            var mayApproach = snapshot.Align && !snapshot.Anchor && pairAlignStarted && !pairStartedPreparation;
+            var mayApproach = snapshot.Align && !snapshot.Anchor &&
+                ((pairAlignStarted && !pairStartedPreparation) || pairRefining);
+            pairCheckpoint = "local_movement";
             if (!mayApproach && (Vector3.Distance(local.Position, pairOrigin) > .08f ||
                     PairRules.AngleDistance(local.Rotation, pairFacing) > .08f))
                 throw new InvalidOperationException(T("Пара отменена: ты начал двигаться или поворачиваться.", "Pair cancelled: you moved or turned."));
             if (snapshot.State is "connecting" or "waiting") return;
+            pairCheckpoint = "alignment_consent";
             if (!snapshot.Align) throw new InvalidOperationException(T("Партнёр не подтвердил обязательное выравнивание. Обновите плагин у обоих.", "Partner did not enable required alignment. Update both plugins."));
             if (snapshot.Align && !snapshot.Anchor && !pairStartedPreparation)
             {
+                pairCheckpoint = "partner_movement";
                 if (Vector3.Distance(target.Position, pairTargetOrigin) > .08f || PairRules.AngleDistance(target.Rotation, pairTargetFacing) > .08f)
                     throw new InvalidOperationException(T("Партнёр сдвинулся; повторите выравнивание.", "Your partner moved; retry alignment."));
                 if (!pairAlignStarted)
                 {
+                    pairCheckpoint = "alignment";
                     pairAlignment ??= new PairAlignment(Interop, Objects);
                     pairAlignment.Begin(pairTargetOrigin, pairTargetFacing);
                     pairAlignStarted = true;
@@ -244,6 +326,7 @@ public sealed partial class Plugin
             }
             if (!pairStartedPreparation)
             {
+                pairCheckpoint = "prepare_mod";
                 pairStartedPreparation = pairPreparing = true;
                 pairMessage = T("Подготавливаю выбранную роль…", "Preparing your selected role…");
                 Play(pairBookmark!, true);
@@ -255,22 +338,51 @@ public sealed partial class Plugin
             {
                 if (!pairPreparing && pairHeldCommand.Length > 0 && !pairReadySent)
                 {
+                    pairCheckpoint = "post_prepare_alignment";
                     if (now > pairConfirmUntil) throw new InvalidOperationException(T("Координаты и поворот не совпали после подготовки. Запуск отменён.", "Position/facing did not match after preparation. Launch cancelled."));
-                    pairStableFrames = PairRules.Aligned(local.Position, local.Rotation, target.Position, target.Rotation) ? pairStableFrames + 1 : 0;
+                    if (!snapshot.Anchor && !pairRefined)
+                    {
+                        if (Vector3.Distance(target.Position, pairTargetOrigin) > .08f ||
+                            PairRules.AngleDistance(target.Rotation, pairTargetFacing) > .08f)
+                            throw new InvalidOperationException("Partner moved during final correction.");
+                        if (!pairRefining)
+                        {
+                            pairAlignment ??= new PairAlignment(Interop, Objects);
+                            pairAlignment.BeginFinalCorrection(target.Position, target.Rotation);
+                            pairAlignStarted = pairRefining = true;
+                            PairDebug($"attempt={pairOfferId} final correction started", true);
+                            pairMessage = T("Довожу координаты и поворот после подготовки…", "Refining position and facing after preparation…");
+                            return;
+                        }
+                        if (!pairAlignment!.Arrived) return;
+                        pairOrigin = local.Position;
+                        pairFacing = local.Rotation;
+                        pairRefining = false;
+                        pairRefined = true;
+                        pairRefineSettledAt = now + 350;
+                        PairDebug($"attempt={pairOfferId} final correction confirmed; waiting for settling", true);
+                    }
+                    if (now < pairRefineSettledAt) return;
+                    pairStableFrames = PairRules.ReadyToLaunch(local.Position, local.Rotation, target.Position, target.Rotation) ? pairStableFrames + 1 : 0;
                     if (pairStableFrames >= 3) { pairSession.Prepared(); pairReadySent = true; }
                     else pairMessage = T("Проверяю совпадение координат и поворота после подготовки…", "Confirming position and facing after preparation…");
                 }
                 if (pairReadySent) pairMessage = T("Выравнивание подтверждено. Ожидаю готовность партнёра…", "Alignment confirmed. Waiting for your partner…");
                 return;
             }
+            pairCheckpoint = "prepared_action";
             if (pairHeldCommand.Length == 0) throw new InvalidOperationException("No locally prepared action.");
             pairMessage = string.Format(T("Общий запуск через {0:0.0} с", "Shared start in {0:0.0}s"), Math.Max(0, snapshot.StartAt - now) / 1000f);
             if (now < snapshot.StartAt) return;
+            pairCheckpoint = "start_deadline";
             if (now - snapshot.StartAt > 250 || now - snapshot.ReceivedAt > 650)
                 throw new InvalidOperationException(T("Пропущено время старта или потеряна связь. Повторите запуск.", "Start was missed or connection lost. Please retry."));
+            pairCheckpoint = "validate_mod";
             ValidatePairSelection();
-            if (!PairRules.Aligned(local.Position, local.Rotation, target.Position, target.Rotation))
+            pairCheckpoint = "final_alignment";
+            if (!PairRules.ReadyToLaunch(local.Position, local.Rotation, target.Position, target.Rotation))
                 throw new InvalidOperationException(T("Перед стартом координаты или поворот разошлись. Запуск отменён.", "Position or facing diverged before start. Launch cancelled."));
+            pairCheckpoint = "dispatch";
             if (snapshot.Align) ApplyPairFacing(pairFacing);
             pairUntargetedPlayback = true;
             DispatchPreparedCommand(pairHeldCommand);
@@ -331,13 +443,20 @@ public sealed partial class Plugin
         if (ImGui.Checkbox(T("Запуск в паре — экспериментально", "Pair launch — experimental"), ref config.PairEnabled)) { StopLink(); Save(); }
         if (!config.PairEnabled) return;
         DrawLinkSettings();
+        ImGui.TextDisabled(LightlessLoaded() ? Localization.Runtime(config.Language, "Lightless Sync: OK") : T("Требуется Lightless Sync", "Lightless Sync required"));
+    }
+
+    private void DrawPairHelp()
+    {
+        ImGui.TextWrapped(T("Включите парный режим у обоих. Правый клик по персонажу → Emote Shelf отправляет приглашение; партнёр принимает его в уведомлении.",
+            "Enable pair mode on both clients. Right-click a player → Emote Shelf to invite; your partner accepts in the notification."));
         ImGui.TextWrapped(LightlessLoaded() ? T("Lightless Sync загружен. Перед запуском дождитесь завершения синхронизации у обоих.", "Lightless Sync is loaded. Wait for synchronization to finish on both sides before launch.") :
             T("Требуется Lightless Sync у обоих участников. Одиночные эмоции его не требуют.", "Lightless Sync is required for both participants. Solo emotes do not require it."));
         ImGui.TextWrapped(T("После установления связи «В паре» или Shift+иконка отправляет предложение анимации. Партнёр выбирает свою роль в уведомлении и принимает запуск либо отказывается. Таргет держать не нужно. Сервер Emote Shelf видит IP и хеши персонажей/мода/выбора; личность персонажа не проверяется. Только с доверенным партнёром.",
             "Once linked, Pair or Shift+icon proposes an animation. Your partner selects their role in the notification and accepts or declines. Keeping a target is not required. The Emote Shelf relay sees IP addresses and character/mod/selection hashes; character identity is not authenticated. Use with trusted partners only."));
         ImGui.TextWrapped(T("Выравнивание обязательно: короткий подход, точная доводка координат и угла, проверка перед запуском.", "Alignment is required: short approach, fine position/facing correction, and confirmation before launch."));
-        ImGui.TextWrapped(T("До 2 ялмов. Один стоит, второй подходит; финальная коррекция позиции — не более 0.05 ялма. Принятие запуска разрешает выравнивание. При ошибке эмоция не запускается. Рост и масштаб не меняются.",
-            "Within 2 yalms. One stands, the other approaches; final position correction is at most 0.05 yalms. Accepting a launch authorizes alignment. Failure cancels playback. Height and scale are unchanged."));
+        ImGui.TextWrapped(T("До 2 ялмов. Один стоит, второй подходит. После подготовки доводка до 0,1 ялма стремится к точности ≤0,01; запуск допускает остаток ≤0,1 ялма. Поворот проверяется отдельно. Принятие запуска разрешает выравнивание. Рост и масштаб не меняются.",
+            "Within 2 yalms. One stands, the other approaches. Post-preparation correction up to 0.1 yalms aims for ≤0.01; playback accepts a residual ≤0.1 yalms. Facing is checked separately. Accepting a launch authorizes alignment. Height and scale are unchanged."));
         ImGui.TextWrapped(T("Моды и внешний вид передаёт Lightless, не наш сервер. Проверяем, что Lightless обрабатывает партнёра, но его API не подтверждает завершение загрузки конкретной анимации.",
             "Lightless transfers mods/appearance, not our relay. We check that it handles the partner, but its API does not confirm that this animation finished downloading."));
     }

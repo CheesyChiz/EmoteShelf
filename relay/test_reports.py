@@ -49,6 +49,16 @@ class ReportTests(unittest.TestCase):
             self.assertEqual(json.loads(payload), self.data)
             self.assertNotIn('private-ip-marker', payload)
 
+    def test_context_and_failure_checkpoints(self):
+        context = dict(PairState='paired', Anchor=True, AlignStarted=False, PreparationStarted=True,
+                       Preparing=False, Ready=False, StableFrames=0)
+        data = dict(self.data, code='launch_cancelled', detail='post_prepare_alignment', context=context)
+        self.assertEqual(json.loads(validate(data)), data)
+        for change in [dict(Name='private'), dict(PairState='secret'), dict(Ready=1),
+                       dict(StableFrames=-1), dict(StableFrames=True)]:
+            with self.assertRaises(ValueError):
+                validate(dict(data, context=dict(context, **change)))
+
 
 if __name__ == '__main__':
     unittest.main()

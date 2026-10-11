@@ -130,9 +130,10 @@ public sealed partial class Plugin : IDalamudPlugin
         if (Objects.LocalPlayer is { } player && (index == player.ObjectIndex || address == player.Address))
             redrawCompleted = true;
     }
-    private void OpenSettings() => settingsOpen = true;
+    private void OpenSettings() { settingsOpen = true; diagnosticsNoticeOpen = true; }
     private void OnCommand(string _, string args)
     {
+        if (!DiagnosticsAcknowledged) { diagnosticsNoticeOpen = true; return; }
         switch (args.Trim().ToLowerInvariant())
         {
             case "scan": Scan(); settingsOpen = true; break;
@@ -309,7 +310,12 @@ public sealed partial class Plugin : IDalamudPlugin
         }
         catch (Exception ex)
         {
-            if (pairPreparation) CancelPair();
+            if (pairPreparation)
+            {
+                pairCheckpoint = "prepare_mod";
+                PairDebug($"preparation exception={ex.GetType().Name}", true);
+                CancelPair(T("Не удалось подготовить мод.", "Mod preparation failed."));
+            }
             pendingCommand = "";
             pendingModDirectory = "";
             pendingOptions = null;
@@ -324,6 +330,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void Update(IFramework _)
     {
+        if (!DiagnosticsAcknowledged) return;
         if (pairSession is null && pendingPoseIndex < 0) pairUntargetedPlayback = false;
         UpdateLink();
         pairAlignment?.Update();
@@ -357,6 +364,7 @@ public sealed partial class Plugin : IDalamudPlugin
                 {
                     waitingForStand = null;
                     status = T("Не удалось встать из /groundsit.", "Could not stand up from /groundsit.") + " " + PoseDiagnostics();
+                    if (pairSession is not null) { pairCheckpoint = "stand_up"; CancelPair(status); }
                 }
             }
             return;
@@ -401,7 +409,8 @@ public sealed partial class Plugin : IDalamudPlugin
             }
             catch (Exception ex)
             {
-                CancelPair();
+                pairCheckpoint = "prepare_validation";
+                CancelPair(T("Проверка подготовленного мода не пройдена.", "Prepared mod validation failed."));
                 pendingPoseIndex = -1;
                 status = string.Format(T("Мод переключен, но эмоция не запустилась: {0}", "Mod switched, but the emote did not start: {0}"), ex.Message);
                 Log.Warning(ex, "Emote failed");
@@ -566,6 +575,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void Draw()
     {
+        if (!DiagnosticsAcknowledged) { DrawDiagnosticsNotice(); return; }
         if (settingsOpen) DrawSettings();
         if (config.OverlayVisible) DrawOverlay();
         DrawLinkNotice();
@@ -652,24 +662,41 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void DrawSettings()
     {
-        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(.055f, .06f, .085f, .97f));
-        ImGui.PushStyleColor(ImGuiCol.ChildBg, new Vector4(.075f, .08f, .11f, .95f));
-        ImGui.PushStyleColor(ImGuiCol.Border, new Vector4(.27f, .24f, .36f, .7f));
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, new Vector4(.065f, .065f, .075f, 1f));
+        ImGui.PushStyleColor(ImGuiCol.ChildBg, new Vector4(.085f, .083f, .095f, 1f));
+        ImGui.PushStyleColor(ImGuiCol.Border, new Vector4(.22f, .21f, .25f, .7f));
         ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(.25f, .19f, .36f, 1));
         ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(.39f, .29f, .53f, 1));
         ImGui.PushStyleColor(ImGuiCol.ButtonActive, new Vector4(.48f, .34f, .65f, 1));
         ImGui.PushStyleColor(ImGuiCol.Header, new Vector4(.25f, .20f, .35f, 1));
         ImGui.PushStyleColor(ImGuiCol.HeaderHovered, new Vector4(.32f, .25f, .44f, 1));
         ImGui.PushStyleColor(ImGuiCol.FrameBg, new Vector4(.115f, .12f, .165f, 1));
+        ImGui.PushStyleColor(ImGuiCol.TitleBg, new Vector4(.075f, .07f, .09f, 1));
+        ImGui.PushStyleColor(ImGuiCol.TitleBgActive, new Vector4(.10f, .085f, .13f, 1));
+        ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(.9f, .88f, .86f, 1));
+        ImGui.PushStyleColor(ImGuiCol.TextDisabled, new Vector4(.55f, .53f, .58f, 1));
+        ImGui.PushStyleColor(ImGuiCol.Tab, new Vector4(.11f, .10f, .14f, 1));
+        ImGui.PushStyleColor(ImGuiCol.TabHovered, new Vector4(.32f, .25f, .44f, 1));
+        ImGui.PushStyleColor(ImGuiCol.TabActive, new Vector4(.25f, .19f, .36f, 1));
         ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, 10f);
         ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 5f);
         ImGui.PushStyleVar(ImGuiStyleVar.ChildRounding, 7f);
         ImGui.PushStyleVar(ImGuiStyleVar.ItemSpacing, new Vector2(9, 7));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(16, 14));
+        ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(10, 6));
         try
         {
         ImGui.SetNextWindowSize(new Vector2(850, 650), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(new Vector2(540, 360), new Vector2(1600, 1200));
         if (!ImGui.Begin("Emote Shelf##settings", ref settingsOpen)) { ImGui.End(); return; }
+        if (lastLaunchFailure.Length > 0)
+        {
+            ImGui.TextColored(new Vector4(1f, .72f, .4f, 1f), T("Последний запуск не состоялся", "Last launch did not complete"));
+            ImGui.SameLine();
+            if (ImGui.SmallButton(T("Скрыть", "Dismiss") + "##launchFailure")) lastLaunchFailure = "";
+            ImGui.TextWrapped(lastLaunchFailure);
+            ImGui.Separator();
+        }
         if (ImGui.BeginTabBar("##tabs"))
         {
             if (ImGui.BeginTabItem(T("Эмоции", "Emotes") + "###emotes", selectEmotesTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None))
@@ -685,21 +712,22 @@ public sealed partial class Plugin : IDalamudPlugin
         }
         ImGui.End();
         }
-        finally { ImGui.PopStyleVar(4); ImGui.PopStyleColor(9); }
+        finally { ImGui.PopStyleVar(6); ImGui.PopStyleColor(16); }
     }
 
     private string T(string ru, string en) => Localization.Get(config.Language, ru, en);
 
     private void DrawEmoteTabTwoPane()
     {
-        ImGui.TextWrapped(T("Выбери мод слева, затем предпросмотри и добавь его эмоцию справа. Закладки сохраняются автоматически.",
-            "Select a mod on the left, then preview and add its emote on the right. Bookmarks save automatically."));
-        if (ImGui.SmallButton(T("Обновить список", "Refresh list"))) Scan();
+        ImGui.Spacing();
+        ImGui.TextUnformatted(T("БИБЛИОТЕКА", "LIBRARY"));
         ImGui.SameLine();
-        ImGui.TextWrapped(status);
-        if (config.HiddenMods.Count > 0)
-            ImGui.TextDisabled(T("Скрытые моды можно вернуть во вкладке «Настройки».", "Restore hidden mods on the Settings tab."));
+        ImGui.TextDisabled($"{discovered.Where(m => m.Command.Length > 0 && !config.HiddenMods.Contains(m.Directory)).Select(m => m.Directory).Distinct().Count()} {T("модов", "mods")}");
+        ImGui.SetNextItemWidth(Math.Max(150, ImGui.GetContentRegionAvail().X - 160));
         ImGui.InputTextWithHint("##search", T("Поиск по эмоции или моду", "Search emote or mod"), ref search, 120);
+        ImGui.SameLine();
+        if (ImGui.Button(T("Обновить", "Refresh"))) Scan();
+        ImGui.Spacing();
 
         var groups = discovered.Where(m => m.Command.Length > 0 && (!config.HiddenMods.Contains(m.Directory) || m.Directory == rightClickMod))
             .GroupBy(m => m.Directory, StringComparer.OrdinalIgnoreCase)
@@ -711,7 +739,8 @@ public sealed partial class Plugin : IDalamudPlugin
 
         var available = ImGui.GetContentRegionAvail();
         var leftWidth = Math.Clamp(available.X * .34f, 230, 340);
-        ImGui.BeginChild("##leftPane", new Vector2(leftWidth, 0), false);
+        var browserHeight = Math.Max(100, available.Y - ImGui.GetTextLineHeightWithSpacing() - 12);
+        ImGui.BeginChild("##leftPane", new Vector2(leftWidth, browserHeight), false);
         if (ImGui.BeginChild("##modTree", new Vector2(0, -36), true))
         {
             foreach (var folder in config.Folders.Order(StringComparer.OrdinalIgnoreCase).Concat([""]).ToArray())
@@ -804,15 +833,13 @@ public sealed partial class Plugin : IDalamudPlugin
         ImGui.PopID();
         ImGui.EndChild();
         ImGui.SameLine();
-        if (ImGui.BeginChild("##modDetails", new Vector2(0, 0), true))
+        if (ImGui.BeginChild("##modDetails", new Vector2(0, browserHeight), true))
         {
             var selected = discovered.Where(m => m.Directory == selectedModDirectory && (!config.HiddenMods.Contains(m.Directory) || m.Directory == rightClickMod)).ToArray();
             if (selected.Length == 0) ImGui.TextDisabled(T("Выбери мод слева.", "Select a mod on the left."));
             else
             {
                 ImGui.TextUnformatted(selected[0].Name);
-                if (ImGui.SmallButton(T("Скрыть мод", "Hide mod"))) { rightClickMod = ""; config.HiddenMods.Add(selectedModDirectory); Save(); }
-                ImGui.SameLine();
                 ImGui.SetNextItemWidth(180);
                 var currentFolder = FolderFor(selectedModDirectory);
                 if (ImGui.BeginCombo("##moveFolder", string.Format(T("Папка: {0}", "Folder: {0}"),
@@ -824,11 +851,28 @@ public sealed partial class Plugin : IDalamudPlugin
                         { config.ModFolders[selectedModDirectory] = folder; expandedFolders.Add(folder); Save(); }
                     ImGui.EndCombo();
                 }
+                ImGui.SameLine(Math.Max(ImGui.GetCursorPosX(), ImGui.GetWindowContentRegionMax().X - 32));
+                if (ImGui.SmallButton("...##modActions")) ImGui.OpenPopup("modActions");
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip(T("Действия с модом", "Mod actions"));
+                if (ImGui.BeginPopup("modActions"))
+                {
+                    if (ImGui.MenuItem(T("Скрыть мод", "Hide mod")))
+                    { rightClickMod = ""; config.HiddenMods.Add(selectedModDirectory); Save(); }
+                    ImGui.EndPopup();
+                }
                 ImGui.Separator();
                 foreach (var mod in selected) DrawEmoteCard(mod);
             }
         }
         ImGui.EndChild();
+        ImGui.Separator();
+        var footer = status.Replace('\n', ' ').Replace('\r', ' ');
+        var clippedFooter = footer;
+        var footerWidth = ImGui.GetContentRegionAvail().X;
+        while (clippedFooter.Length > 0 && ImGui.CalcTextSize(clippedFooter + "…").X > footerWidth)
+            clippedFooter = clippedFooter[..^1];
+        ImGui.TextDisabled(clippedFooter.Length < footer.Length ? clippedFooter + "…" : footer);
+        if (ImGui.IsItemHovered() && footer.Length > 0) ImGui.SetTooltip(status);
     }
 
     private void AcceptModDrop(string folder)
@@ -918,7 +962,7 @@ public sealed partial class Plugin : IDalamudPlugin
             if (!draftOptions.TryGetValue(mod.Directory, out var draft))
             {
                 try { draft = CreateBookmark(mod, null).SavedOptions ?? []; draftOptions[mod.Directory] = draft; }
-                catch (Exception ex) { ImGui.TextWrapped(ex.Message); }
+                catch (Exception ex) { ImGui.TextWrapped(Localization.Runtime(config.Language, ex.Message)); }
             }
             if (draft is not null)
             {
@@ -1017,7 +1061,7 @@ public sealed partial class Plugin : IDalamudPlugin
         ImGui.TextWrapped(T("Найди эмоцию, проверь её через «Предпросмотр» и добавь на панель. Закладка сохранится автоматически.",
             "Find an emote, try Preview, then add it to the panel. The bookmark is saved automatically."));
         if (ImGui.Button(T("Обновить список", "Refresh list"))) Scan();
-        ImGui.TextWrapped(status);
+        ImGui.TextWrapped(Localization.Runtime(config.Language, status));
         if (config.HiddenMods.Count > 0)
             ImGui.TextDisabled(T("Скрытые моды можно вернуть во вкладке «Настройки».",
                 "Restore hidden mods on the Settings tab."));
@@ -1211,7 +1255,7 @@ public sealed partial class Plugin : IDalamudPlugin
         var target = GetPoseIndex(mod);
         ImGui.TextDisabled($"{T("Текущий слот", "Current slot")}: {(current < 0 ? "—" : current.ToString("00"))} / {T("нужен", "target")}: {(target < 0 ? "—" : target.ToString("00"))}");
         ImGui.BeginDisabled(current < 0 || pendingCommand.Length > 0 || waitingForStand is not null);
-        if (ImGui.SmallButton("Change pose##manual"))
+        if (ImGui.SmallButton(Localization.Runtime(config.Language, "Change pose") + "##manual"))
         {
             pendingPoseIndex = -1;
             ExecuteEmote("/cpose");
@@ -1326,16 +1370,33 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void DrawHelpTab()
     {
+        ImGui.TextUnformatted(Localization.Runtime(config.Language, "FAQ"));
+        if (ImGui.CollapsingHeader(T("Как добавить и запустить эмоцию?", "How do I add and play an emote?")))
+        {
         ImGui.TextWrapped(T(
             "1. Во вкладке «Эмоции» выбери мод слева. Справа проверь нужный вариант через «Предпросмотр» и добавь его на панель. Кнопки под списком создают, переименовывают и удаляют локальные папки; мод можно перетащить в папку.\n\n2. Клик по значку запускает эмоцию, Ctrl+Shift+клик удаляет значок. Значки можно переставлять перетаскиванием. Панель настраивается во вкладке «Панель».\n\n3. Плагин временно выбирает мод в Penumbra; сброс — во вкладке «Настройки». Для /groundsit и стоячих idle номер позы определяется из файлов мода. При нескольких слотах выбери нужный файл. Неопознанные моды находятся в отдельном разделе настроек.",
             "1. On Emotes, select a mod on the left. On the right, test a variant with Preview and add it to the panel. Buttons below the list create, rename, and delete local folders; drag mods onto folders.\n\n2. Click an icon to play; Ctrl+Shift+click to remove it. Drag icons to reorder them. Customize the overlay on Panel.\n\n3. The plugin temporarily selects a Penumbra mod; clear this on Settings. It detects /groundsit and standing-idle slots from mod files. Select a file when several slots are present. Unrecognized animation mods are tucked away in Settings."));
         ImGui.Separator();
         ImGui.TextWrapped(T("Неинтересные моды можно скрыть прямо в каталоге. Вернуть их можно во вкладке «Настройки» → «Скрытые моды». Уже добавленные значки при этом остаются на панели.",
             "Hide unwanted mods directly in the browser. Restore them under Settings → Hidden mods. Existing panel bookmarks remain intact."));
+        ImGui.TextWrapped(T("Скрытие находится в меню «…» справа от выбора папки. Правый клик по значку панели открывает его мод.",
+            "Hide is in the … menu to the right of the folder selector. Right-click a panel icon to open its mod."));
+        }
+        if (ImGui.CollapsingHeader(T("Как работают позы?", "How do poses work?")))
+            ImGui.TextWrapped(T("Слот берётся из файлов мода. Автовыбор включается в настройках; без него нажимай Change pose вручную. /cpose без аргументов переключает следующую позу. Поддержка выбора номера через /cpose N пока не подтверждена.",
+                "The slot comes from the mod files. Enable automatic selection in Settings, or click Change pose manually. Plain /cpose cycles to the next pose. Selecting a numbered pose with /cpose N is not yet verified."));
+        if (ImGui.CollapsingHeader(T("Как запускать анимации вдвоём?", "How do I play with a partner?"))) DrawPairHelp();
+        if (ImGui.CollapsingHeader(T("Как настроить панель и уведомления?", "How do I position the panel and notifications?")))
+            ImGui.TextWrapped(T("Во вкладке «Панель» открепи панель и перетащи её. Над чатом включи рост вверх, справа экрана — влево. Для одной колонки выбери 1 значок в строке. Положение парного уведомления меняется в настройках пары через предпросмотр.",
+                "Unlock and drag the panel on the Panel tab. Above chat, grow upward; at the right edge, grow leftward. Set one icon per row for a column. Use the notification preview in pair settings to move the pair notice."));
+        if (ImGui.CollapsingHeader(T("Что делать при ошибке?", "What should I do if something fails?")))
+            ImGui.TextWrapped(T("Причина последнего отказа остаётся в окне плагина. Технические отчёты отправляются автоматически; это обязательное условие использования, показанное до первого запуска. Состав данных, хранение и состояние отправки — в Settings → Обязательная диагностика. Подробная локальная диагностика добавляет сетевые события. Неопознанным модам нужна команда только если нужная эмоция отсутствует в каталоге.",
+                "The last failure remains visible in the plugin window. Technical reports upload automatically as a required condition disclosed before first use. See Settings → Required diagnostics for collected fields, retention and delivery status. Verbose local diagnostics add network events. Unrecognized mods need a command only when the intended emote is missing from the browser."));
     }
 
     private void DrawAdvancedTab()
     {
+        if (ImGui.CollapsingHeader(T("Обязательная диагностика", "Required diagnostics"))) DrawReportSettings();
         if (ImGui.Checkbox(T("Автовыбор позы (экспериментально, недостаточно протестировано)", "Automatic pose selection (experimental, not fully tested)"), ref config.AutomaticPose))
         { pendingPoseIndex = -1; Save(); }
         DrawPairSettings();
@@ -1360,12 +1421,8 @@ public sealed partial class Plugin : IDalamudPlugin
             catch (Exception ex) { status = ex.Message; }
             activeCollection = Guid.Empty;
         }
-        ImGui.TextWrapped(T("Неопознанные анимации: только если нужной эмоции нет во вкладке «Эмоции», укажи её игровую команду.",
-            "Unidentified animations: only if your emote is missing from Emotes, enter its game command here."));
         if (config.HiddenMods.Count > 0 && ImGui.TreeNode($"{T("Скрытые моды", "Hidden mods")} ({config.HiddenMods.Count})###hidden"))
         {
-            ImGui.TextWrapped(T("Скрытие убирает мод из каталога, но не удаляет уже добавленные значки с панели.",
-                "Hiding removes a mod from the browser but keeps existing panel bookmarks."));
             foreach (var directory in config.HiddenMods.ToArray())
             {
                 ImGui.PushID(directory);
@@ -1379,8 +1436,7 @@ public sealed partial class Plugin : IDalamudPlugin
         var unknown = discovered.Where(m => m.Command.Length == 0 && !config.HiddenMods.Contains(m.Directory)).ToArray();
         if (unknown.Length > 0 && ImGui.TreeNode($"{T("Неопознанные моды", "Unrecognized mods")} ({unknown.Length})###unknown"))
         {
-        ImGui.TextWrapped(T("Это моды с файлами анимаций, но без надёжно определённой игровой эмоции. Многие меняют боевые или фоновые анимации и не требуют действий здесь. /cpose3 — не команда игры.",
-            "These mods contain animation files, but no reliable game emote was identified. Many affect combat or idle animations and need no action here. /cpose3 is not a game command."));
+        ImGui.TextDisabled(T("Укажи известную игровую команду эмоции.", "Enter a known game emote command."));
         foreach (var mod in unknown)
         {
             var command = config.CommandOverrides.GetValueOrDefault(mod.Directory, "");

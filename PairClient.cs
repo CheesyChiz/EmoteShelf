@@ -2,6 +2,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Collections.Concurrent;
 
 namespace EmoteShelf;
 
@@ -18,6 +19,13 @@ public sealed class PairClient : IDisposable
     private readonly Task worker;
     public PairSnapshot Snapshot => Volatile.Read(ref snapshot);
     public Task Completion => worker;
+    private readonly ConcurrentQueue<string> diagnostics = new();
+    public bool TryReadDiagnostic(out string? entry) => diagnostics.TryDequeue(out entry);
+    private void Diagnostic(string text)
+    {
+        while (diagnostics.Count >= 64) diagnostics.TryDequeue(out _);
+        diagnostics.Enqueue($"{DateTime.UtcNow:HH:mm:ss.fff}Z {text}");
+    }
 
     public PairClient(string self, string target, string family, bool align, HttpMessageHandler? handler = null)
     {
@@ -40,6 +48,8 @@ public sealed class PairClient : IDisposable
         // Known Content-Length: the bounded relay intentionally rejects streaming bodies.
         if (body is not null) request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
         using var response = await http.SendAsync(request, cancellation).ConfigureAwait(false);
+        if (!response.IsSuccessStatusCode || method != HttpMethod.Get)
+            Diagnostic($"pair HTTP {method} {path} status={(int)response.StatusCode}");
         response.EnsureSuccessStatusCode();
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellation).ConfigureAwait(false));
         return document.RootElement.Clone();
@@ -51,8 +61,11 @@ public sealed class PairClient : IDisposable
         var sentPrepared = false;
         long startAt = 0;
         var deadline = Environment.TickCount64 + 60000;
+        var checkpoint = "register";
+        var lastState = "";
         try
         {
+            Diagnostic("pair register start");
             var ready = await Send(HttpMethod.Post, "v1/ready", null, new { self, target, animation = family, align }, stop.Token).ConfigureAwait(false);
             token = ready.GetProperty("token").GetString();
             if (token is null || token.Length != 43 || token.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-' && c != '_'))
@@ -62,16 +75,25 @@ public sealed class PairClient : IDisposable
                 if (Environment.TickCount64 >= deadline) throw new TimeoutException("Pair readiness expired.");
                 if (Volatile.Read(ref prepared) != 0 && !sentPrepared)
                 {
+                    checkpoint = "prepared";
                     await Send(HttpMethod.Post, "v1/prepared", token, null, stop.Token).ConfigureAwait(false);
                     sentPrepared = true;
                 }
                 var sent = Environment.TickCount64;
+                checkpoint = "poll";
                 var state = await Send(HttpMethod.Get, "v1/session", token, null, stop.Token).ConfigureAwait(false);
                 var received = Environment.TickCount64;
                 var name = state.GetProperty("status").GetString() ?? "";
+                if (name != lastState)
+                {
+                    // Never record arbitrary response content.
+                    Diagnostic($"pair state={(name is "waiting" or "paired" or "scheduled" ? name : "ended_or_invalid")} preparedSent={sentPrepared} rttMs={received - sent}");
+                    lastState = name;
+                }
                 if (name is not ("waiting" or "paired" or "scheduled")) throw new InvalidOperationException("The pair was cancelled or expired.");
                 if (name == "scheduled")
                 {
+                    checkpoint = "schedule";
                     if (!sentPrepared) throw new InvalidOperationException("Unexpected start before local preparation.");
                     if (startAt == 0)
                     {
@@ -93,6 +115,7 @@ public sealed class PairClient : IDisposable
         catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
         catch (Exception ex)
         {
+            Diagnostic($"pair failure checkpoint={checkpoint} exception={ex.GetType().Name}");
             // Only a short local diagnostic is shown; no bearer tokens or request bodies.
             Volatile.Write(ref snapshot, new PairSnapshot("error", false, false, 0, Environment.TickCount64,
                 ex is HttpRequestException requestError ? $"Relay connection failed ({requestError.StatusCode?.ToString() ?? "network"}); please retry." : ex.Message));
@@ -111,7 +134,7 @@ public sealed class PairClient : IDisposable
                     }
                     else await Send(HttpMethod.Delete, "v1/session", token, null, cleanup.Token).ConfigureAwait(false);
                 }
-                catch { /* The server also expires abandoned leases. */ }
+                catch (Exception ex) { Diagnostic($"pair cleanup failure exception={ex.GetType().Name}"); }
             }
             http.Dispose();
             // Do not dispose stop here: Dispose may race worker completion.

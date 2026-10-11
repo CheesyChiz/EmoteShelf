@@ -1,6 +1,13 @@
-# Opt-in error reports
+# Required diagnostics with first-use disclosure
 
-Uploads are disabled by default. Consent can be revoked in Settings; a request already received cannot be recalled. No full log upload, disk queue, persistent installation identifier or automatic retry. Client limits: 1/minute and same category 1/10 minutes. Only fixed-schema metadata is sent, not gameplay content. Reports are untrusted client claims, not proof of cause or identity.
+Extended reports accept an optional closed `context` object: pair protocol state, anchor role,
+alignment/preparation flags, local readiness and bounded stable-frame count. Failure checkpoints
+are allowlisted enum values, not exception messages. Old clients remain accepted. These fields
+do not assert the peer's readiness; that is inferred only from the shared scheduled state.
+Local copied diagnostics retain the last pair failure independently of the bounded event queue.
+Basic lifecycle/failure events are captured even when verbose pair diagnostics are disabled.
+
+New clients are inactive until users explicitly accept the versioned diagnostics notice. The old optional-upload preference is not migrated to acceptance. There is no upload toggle during use; users can decline and leave the plugin inactive, or disable/uninstall it. No full log upload, disk queue or persistent installation identifier. The bounded in-memory queue holds 32 reports, deduplicates each attempt/code/checkpoint, sends at most one request/minute and retries transient failures up to four attempts. Unloading discards pending reports. Delivery is not guaranteed. Only fixed-schema metadata is sent, not gameplay content. Reports are untrusted client claims, not proof of cause or identity. Legacy clients can still submit their previous optional reports.
 
 ## Storage and access
 

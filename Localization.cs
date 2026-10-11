@@ -1,6 +1,6 @@
 namespace EmoteShelf;
 
-internal static class Localization
+internal static partial class Localization
 {
     private static readonly Dictionary<string, (string Ja, string De, string Fr)> Text = new(StringComparer.Ordinal)
     {
@@ -125,6 +125,7 @@ internal static class Localization
 
     internal static string Get(string language, string ru, string en)
     {
+        EnglishMessages.TryAdd(ru, en);
         if (language == "ru") return ru;
         if (language == "en") return en;
         if (en.StartsWith("1. On Emotes", StringComparison.Ordinal)) return Help(language, en);

@@ -6,6 +6,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Localization.cs" Link="Localization.cs" />
+    <Compile Include="../Localization.Extra.cs" Link="Localization.Extra.cs" />
+    <Compile Include="../Localization.Runtime.cs" Link="Localization.Runtime.cs" />
     <Compile Include="../PanelLayout.cs" Link="PanelLayout.cs" />
     <Compile Include="../PoseSlot.cs" Link="PoseSlot.cs" />
     <Compile Include="../ResolvedAnimation.cs" Link="ResolvedAnimation.cs" />
@@ -13,6 +16,7 @@
     <Compile Include="../PosePlayback.cs" Link="PosePlayback.cs" />
     <Compile Include="../PairRules.cs" Link="PairRules.cs" />
     <Compile Include="../PairClient.cs" Link="PairClient.cs" />
+    <Compile Include="../ErrorReports.cs" Link="ErrorReports.cs" />
     <Compile Include="../LinkClient.cs" Link="LinkClient.cs" />
     <Compile Include="../PapCompatibility.cs" Link="PapCompatibility.cs" />
     <Compile Include="../ModScanner.cs" Link="ModScanner.cs" />

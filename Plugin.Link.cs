@@ -18,10 +18,11 @@ public sealed partial class Plugin
     private string lastLinkDiagnostic = "", lastInviteDiagnostic = "", lastInviteReason = "";
     private readonly Queue<string> pairDebugLines = new();
     private string lastHudDiagnostic = "";
-    private void PairDebug(string text)
+    private string lastPairFailure = "";
+    private void PairDebug(string text, bool essential = false)
     {
-        if (!config.PairDebug) return;
-        while (pairDebugLines.Count >= 80) pairDebugLines.Dequeue();
+        if (!essential && !config.PairDebug) return;
+        while (pairDebugLines.Count >= 200) pairDebugLines.Dequeue();
         pairDebugLines.Enqueue($"{DateTime.UtcNow:HH:mm:ss.fff}Z {text}");
         Log.Information("Pair debug: " + text);
     }
@@ -67,7 +68,7 @@ public sealed partial class Plugin
         if (diagnostic != lastLinkDiagnostic)
         {
             Log.Information("Pair connection: " + diagnostic);
-            PairDebug(diagnostic);
+            PairDebug(diagnostic, true);
             lastLinkDiagnostic = diagnostic;
             if (s.State == "error") ReportPairError("connection_failed");
             else if (s.Error.Length > 0) ReportPairError("request_rejected");
@@ -85,13 +86,14 @@ public sealed partial class Plugin
     }
     private void OnPairContextMenu(IMenuOpenedArgs args)
     {
+        if (!DiagnosticsAcknowledged) return;
         if (!config.PairEnabled || args.Target is not MenuTargetDefault { TargetObject: IPlayerCharacter actor } ||
             Objects.LocalPlayer is not { } local || actor.GameObjectId == local.GameObjectId) return;
         var identity = LinkIdentity(actor);
         var disconnect = LinkFresh && link!.Snapshot.State == "linked" && link.Snapshot.Partner == identity;
         var reason = disconnect ? "" : InviteBlockReason(actor);
-        lastInviteReason = reason;
-        var diagnostic = disconnect ? "disconnect available" : reason.Length == 0 ? "invite available" : reason;
+        lastInviteReason = Localization.English(reason);
+        var diagnostic = disconnect ? "disconnect available" : reason.Length == 0 ? "invite available" : Localization.English(reason);
         if (diagnostic != lastInviteDiagnostic)
         {
             Log.Information("Pair invitation menu: " + diagnostic);
@@ -115,25 +117,24 @@ public sealed partial class Plugin
     }
     private void DrawLinkSettings()
     {
-        if (ImGui.CollapsingHeader(T("Отправка отчётов ошибок (добровольно)", "Error report uploads (opt-in)"))) DrawReportSettings();
-        if (ImGui.Checkbox(T("Подробная диагностика пары", "Detailed pair diagnostics"), ref config.PairDebug)) Save();
-        ImGui.TextWrapped(T("Сервер: ", "Relay: ") + (link?.Snapshot.State ?? "disconnected") +
+        ImGui.TextWrapped(T("Сервер: ", "Relay: ") + Localization.Runtime(config.Language, link?.Snapshot.State ?? "disconnected") +
             (link is not null && !LinkFresh ? T(" — ответ устарел", " — stale response") : ""));
         if (!LightlessLoaded()) ImGui.TextWrapped(T("Lightless не загружен.", "Lightless is not loaded."));
+        if (ImGui.CollapsingHeader(T("Диагностика", "Diagnostics")))
+        {
+        if (ImGui.Checkbox(T("Подробная диагностика пары", "Detailed pair diagnostics"), ref config.PairDebug)) Save();
         if (lastInviteReason.Length > 0) ImGui.TextWrapped(T("Последняя проверка меню приглашения: ", "Last invitation menu check: ") + lastInviteReason);
         if (link?.LastIssue.Length > 0) ImGui.TextWrapped(T("Последняя ошибка (сохраняется для диагностики): ", "Last error (retained for diagnosis): ") + link.LastIssue);
         if (ImGui.Button(T("Скопировать диагностику", "Copy diagnostics")))
-            ImGui.SetClipboardText($"Emote Shelf {typeof(Plugin).Assembly.GetName().Version}\nRelay: {link?.Snapshot.State ?? "disconnected"}; fresh={LinkFresh}; Lightless loaded={LightlessLoaded()}\nLast menu check: {lastInviteReason}\nLast error: {link?.LastIssue}\n" + string.Join("\n", pairDebugLines));
-        if (config.PairDebug) ImGui.TextWrapped(T("Воспроизведите сбой, затем скопируйте отчёт у обоих игроков. Имена, IP и токены в отчёт не включаются. Повторяющиеся успешные опросы не записываются.", "Reproduce the issue, then copy reports from both players. Reports exclude names, IPs and tokens. Repeated successful polls are omitted."));
+            ImGui.SetClipboardText($"Emote Shelf {typeof(Plugin).Assembly.GetName().Version}\nRelay: {link?.Snapshot.State ?? "disconnected"}; fresh={LinkFresh}; Lightless loaded={LightlessLoaded()}\nRequired diagnostics acknowledged={DiagnosticsAcknowledged}; upload status={errorReports.Status}\nLast menu check: {lastInviteReason}\nLast error: {link?.LastIssue}\nLast pair failure: {lastPairFailure}\n" + string.Join("\n", pairDebugLines));
+        }
         var partner = LinkedPartner;
-        ImGui.TextWrapped(link?.Snapshot.State == "linked"
-            ? T("Партнёр: ", "Partner: ") + (partner?.Name.TextValue ?? T("не рядом", "not nearby"))
-            : T("Пригласи партнёра через правый клик по персонажу → Emote Shelf. Принимать приглашения можно, пока включён парный режим.",
-                "Right-click a player → Emote Shelf to invite. Invitations are received while pair mode is enabled."));
+        if (link?.Snapshot.State == "linked")
+            ImGui.TextWrapped(T("Партнёр: ", "Partner: ") + (partner?.Name.TextValue ?? T("не рядом", "not nearby")));
         if (link?.Snapshot.State is "linked" or "incoming" or "outgoing")
             if (ImGui.Button(T("Разорвать связь / отменить приглашение", "Disconnect / cancel invitation"))) { CancelPair(); link.Act("disconnect"); }
         if (link?.Snapshot.State == "error" && ImGui.Button(T("Переподключиться", "Reconnect"))) StopLink();
-        if (link?.Snapshot.Error.Length > 0) ImGui.TextWrapped(link.Snapshot.Error);
+        if (link?.Snapshot.Error.Length > 0) ImGui.TextWrapped(Localization.Runtime(config.Language, link.Snapshot.Error));
         if (ImGui.Checkbox(T("Настроить положение уведомления", "Preview / position notification"), ref linkPreview)) linkPositionApplied = false;
         ImGui.SameLine();
         if (ImGui.Button(T("Сбросить положение", "Reset position"))) { config.PairNoticeX = config.PairNoticeY = -1; linkPositionApplied = false; linkPreview = true; Save(); }
@@ -194,7 +195,7 @@ public sealed partial class Plugin
                     ImGui.PopStyleColor();
                 }
                 else if (Environment.TickCount64 < linkNoticeUntil && linkNotice.Length > 0) ImGui.TextWrapped(linkNotice);
-                if (pairSession is not null && ImGui.Button(T("Отменить запуск", "Cancel launch"))) CancelPair(T("Запуск отменён.", "Launch cancelled."));
+                if (pairSession is not null && ImGui.Button(T("Отменить запуск", "Cancel launch"))) CancelPair(T("Запуск отменён пользователем.", "Launch cancelled by user."), failure: false);
                 if (pairSession is not null && pairCollectionWarning.Length > 0) ImGui.TextWrapped(pairCollectionWarning);
             }
             if (linkPreview && ImGui.Button(T("Закрыть предпросмотр", "Close preview"))) linkPreview = false;

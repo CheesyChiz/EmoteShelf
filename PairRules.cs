@@ -6,6 +6,12 @@ namespace EmoteShelf;
 
 public static class PairRules
 {
+    public const float FinalCorrectionLimit = .10f;
+    public const float LaunchDistanceTolerance = .10f;
+    public static bool ReadyToLaunch(Vector3 a, float yawA, Vector3 b, float yawB)
+        => Vector3.Distance(a, b) <= LaunchDistanceTolerance && AngleDistance(yawA, yawB) <= .01f;
+    public static bool CanFineCorrect(Vector3 from, Vector3 to, float yaw)
+        => float.IsFinite(yaw) && Nearby(from, to) && Vector3.Distance(from, to) <= FinalCorrectionLimit;
     public static bool ShowPairHud(bool enabled, bool fresh, string? state, bool preview)
         => preview || (enabled && fresh && state is "linked" or "incoming" or "outgoing");
     public static bool Aligned(Vector3 a, float yawA, Vector3 b, float yawB)

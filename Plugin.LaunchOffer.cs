@@ -164,6 +164,6 @@ public sealed partial class Plugin
         }
         else if (ImGui.Button(T("Обновить список модов", "Refresh mods"))) { Scan(); offerEditorId = ""; }
         if (ImGui.Button(T("Отказаться", "Decline"))) link?.Act("reject_launch", invitation: request.Offer.Id);
-        if (offerEditorError.Length > 0) ImGui.TextWrapped(offerEditorError);
+        if (offerEditorError.Length > 0) ImGui.TextWrapped(Localization.Runtime(config.Language, offerEditorError));
     }
 }

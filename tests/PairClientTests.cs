@@ -56,6 +56,12 @@ internal static class PairClientTests
         using var d = new PairClient(new('a', 64), new('b', 64), new('c', 64), false, new FakeHandler(invalid));
         await d.Completion.WaitAsync(TimeSpan.FromSeconds(3));
         if (d.Snapshot.State != "error" || invalid.Deleted != 1) throw new Exception("Unprepared remote start accepted.");
+        var events = new List<string>();
+        while (d.TryReadDiagnostic(out var entry)) events.Add(entry!);
+        if (!events.Any(x => x.Contains("checkpoint=schedule")) || !events.Any(x => x.Contains("preparedSent=False")))
+            throw new Exception("Pair failure checkpoint or readiness missing from diagnostics.");
+        if (events.Count > 64 || events.Any(x => x.Contains(new string('a', 43)) || x.Contains("Bearer")))
+            throw new Exception("Diagnostics leaked a capability or exceeded the event bound.");
         Console.WriteLine("Pair client barrier, shared clock, cancellation and unsolicited-start tests passed.");
     }
 

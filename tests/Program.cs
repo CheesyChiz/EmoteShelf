@@ -1,5 +1,7 @@
 using EmoteShelf;
 
+LocalizationTests.Run();
+
 static void Check(string name, int? actual, int? expected)
 {
     if (actual != expected) throw new Exception($"{name}: expected {expected}, got {actual}");
@@ -132,6 +134,7 @@ if (PairRules.Identity("Alice", 1, 2, 3) != PairRules.Identity(" ALICE ", 1, 2, 
 try { PairRules.StartTime(100, 800, 2000); throw new Exception("High-latency sample was accepted."); }
 catch (InvalidOperationException) { }
 await PairClientTests.Run();
+await ErrorReportsTests.Run();
 await LinkDiagnosticsTests.Run();
 foreach (var left in new[] { false, true })
 foreach (var up in new[] { false, true })
@@ -153,6 +156,20 @@ if (PairRules.AngleDistance(MathF.PI - .01f, -MathF.PI + .01f) > .021f ||
     !float.IsPositiveInfinity(PairRules.AngleDistance(float.NaN, 0)))
     throw new Exception("Pair heading wrap/invalid-angle regression");
 Console.WriteLine("Pair heading wraparound and invalid-angle tests passed.");
+if (!PairRules.CanFineCorrect(System.Numerics.Vector3.Zero, new(.05695f, 0, 0), 0) ||
+    !PairRules.CanFineCorrect(System.Numerics.Vector3.Zero, new(.10f, 0, 0), 0) ||
+    PairRules.CanFineCorrect(System.Numerics.Vector3.Zero, new(.1001f, 0, 0), 0) ||
+    PairRules.CanFineCorrect(System.Numerics.Vector3.Zero, new(float.NaN, 0, 0), 0) ||
+    PairRules.CanFineCorrect(System.Numerics.Vector3.Zero, System.Numerics.Vector3.Zero, float.NaN))
+    throw new Exception("Bounded final alignment correction regression");
+Console.WriteLine("Final correction bounds and observed 0.05695-yalm residual tests passed.");
+if (!PairRules.ReadyToLaunch(System.Numerics.Vector3.Zero, 0, new(.05695f, 0, 0), 0) ||
+    !PairRules.ReadyToLaunch(System.Numerics.Vector3.Zero, 0, new(.1f, 0, 0), 0) ||
+    PairRules.ReadyToLaunch(System.Numerics.Vector3.Zero, 0, new(.1001f, 0, 0), 0) ||
+    PairRules.ReadyToLaunch(System.Numerics.Vector3.Zero, 0, new(.05f, 0, 0), .02f) ||
+    PairRules.Aligned(System.Numerics.Vector3.Zero, 0, new(.05695f, 0, 0), 0))
+    throw new Exception("Fine target and launch tolerance must remain separate");
+Console.WriteLine("0.01 fine target / inclusive 0.1 launch tolerance tests passed.");
 if (PairRules.ShowPairHud(true, true, "error", false) || PairRules.ShowPairHud(true, false, "linked", false) ||
     PairRules.ShowPairHud(false, true, "linked", false) || !PairRules.ShowPairHud(true, true, "incoming", false) ||
     !PairRules.ShowPairHud(true, true, "linked", false) || !PairRules.ShowPairHud(false, false, null, true))
