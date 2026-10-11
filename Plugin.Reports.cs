@@ -6,9 +6,10 @@ namespace EmoteShelf;
 public sealed partial class Plugin
 {
     private readonly ErrorReports errorReports = new();
-    private const int DiagnosticsPolicyVersion = 3;
     private bool diagnosticsNoticeOpen = true;
-    private bool DiagnosticsAcknowledged => config.DiagnosticsNoticeVersion == DiagnosticsPolicyVersion;
+    // Preserve acceptance from every previous release. Zero means never accepted.
+    // Keep the existing persisted field so upgrading does not reset this choice.
+    private bool DiagnosticsAcknowledged => config.DiagnosticsNoticeVersion > 0;
     private void DrawDiagnosticsNotice()
     {
         if (!diagnosticsNoticeOpen) return;
@@ -22,7 +23,7 @@ public sealed partial class Plugin
             ImGui.TextWrapped(T("До принятия плагин не запускает эмоции, не подключает пару и ничего не отправляет. Закрой это окно, чтобы не использовать плагин; отключить или удалить его можно в установщике Dalamud. После принятия прекратить сбор можно отключением плагина.",
                 "Until accepted, the plugin does not play emotes, connect pairs or upload data. Close this window to leave it inactive; disable or uninstall it in Dalamud. After acceptance, disable the plugin to stop collection."));
             if (ImGui.Button(T("Принять условия и использовать", "Accept terms and use plugin")))
-            { config.DiagnosticsNoticeVersion = DiagnosticsPolicyVersion; Save(); }
+            { config.DiagnosticsNoticeVersion = 1; Save(); }
             ImGui.SameLine();
             if (ImGui.Button(T("Не использовать", "Do not use"))) diagnosticsNoticeOpen = false;
             ImGui.PopTextWrapPos();
