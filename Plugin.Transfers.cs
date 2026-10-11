@@ -312,7 +312,7 @@ public sealed partial class Plugin
         ImGui.EndDisabled();
         if (transfers is null) ImGui.TextWrapped(T("Сначала установи связь с партнёром.", "Link with your partner first."));
         DrawTransferOffer();
-        if (transferMessage.Length > 0) ImGui.TextWrapped(transferMessage);
+        if (transferMessage.Length > 0 && (transfers?.Offer is null || transfers.Error.Length > 0)) ImGui.TextWrapped(transferMessage);
     }
 
     private void DrawTransferOffer()
@@ -320,7 +320,21 @@ public sealed partial class Plugin
         if (transfers?.Offer is not { } offer) return;
         if (LinkedPartner is { } partner) ImGui.TextUnformatted(partner.Name.TextValue);
         ImGui.TextUnformatted(offer.Name);
-        ImGui.TextDisabled($"{offer.Size / 1048576.0:F1} MiB · {offer.Remaining}s");
+        ImGui.TextDisabled(string.Format(T("{0:F1} МиБ · до истечения передачи: {1} с", "{0:F1} MiB · transfer expires in {1}s"), offer.Size / 1048576.0, offer.Remaining));
+        if (offer.State is "accepted" or "ready")
+        {
+            var downloaded = transfers.Download is { } p && p.Id == offer.Id ? p : null;
+            var downloading = offer.Incoming && offer.State == "ready";
+            var bytes = Math.Clamp(downloading ? downloaded?.Bytes ?? 0 : offer.Offset, 0, offer.Size);
+            var label = offer.State == "accepted"
+                ? T("Загрузка на сервер", "Uploading to relay")
+                : !offer.Incoming ? T("Ожидаем скачивание и установку у партнёра", "Waiting for partner download and installation")
+                : downloaded?.Verified == true ? T("Установка и включение в Penumbra", "Installing and enabling in Penumbra")
+                : bytes == offer.Size ? T("Проверка контрольной суммы и архива", "Checking checksum and archive")
+                : T("Скачивание с сервера", "Downloading from relay");
+            ImGui.TextWrapped(label);
+            ImGui.ProgressBar((float)bytes / offer.Size, new Vector2(-1, 0), $"{100.0 * bytes / offer.Size:F0}% · {bytes / 1048576.0:F1} / {offer.Size / 1048576.0:F1} MiB");
+        }
         if (offer.Incoming && offer.State == "offered")
         {
             try
@@ -360,8 +374,8 @@ public sealed partial class Plugin
         }
         else
         {
-            if (transfers.Error.Length == 0)
-                ImGui.TextUnformatted(offer.State == "offered" ? T("Ожидаем принятия", "Waiting for acceptance") : T("Передача и проверка…", "Transferring and checking…"));
+            if (transfers.Error.Length == 0 && offer.State == "offered")
+                ImGui.TextUnformatted(T("Ожидаем принятия", "Waiting for acceptance"));
             if (ImGui.Button(T("Отмена", "Cancel"))) transfers.Act(offer.Incoming ? "reject" : "cancel", offer.Id);
         }
     }

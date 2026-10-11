@@ -1,8 +1,24 @@
 import unittest
 from server import PairStore
+from server import Handler, rates
+from unittest.mock import patch
 
 
 class Tests(unittest.TestCase):
+    def test_bulk_budget_is_separate_and_bounded(self):
+        handler = object.__new__(Handler)
+        handler.headers = {}
+        handler.client_address = ('127.0.0.1', 1234)
+        handler.path = '/v5/transfer'
+        rates.clear()
+        with patch('server.time.monotonic', return_value=100):
+            self.assertTrue(all(handler.allowed() for _ in range(120)))
+            self.assertFalse(handler.allowed())
+            handler.path = '/v2/link'
+            self.assertTrue(all(handler.allowed() for _ in range(30)))
+            self.assertFalse(handler.allowed())
+        rates.clear()
+
     def setUp(self):
         self.now = 100
         self.s = PairStore(lambda: self.now)

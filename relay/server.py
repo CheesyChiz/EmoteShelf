@@ -122,14 +122,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def allowed(self):
         address = self.headers.get('X-Forwarded-For', self.client_address[0]).split(',')[0].strip()
+        # Bulk chunks must not consume the pair/control request budget. Package,
+        # body, capability, TTL and storage limits remain enforced independently.
+        bulk = self.path in ('/v4/transfer', '/v5/transfer')
+        bucket = (address, bulk)
         now = int(time.monotonic())
         with rate_lock:
             for key in list(rates):
                 if rates[key][0] < now - 2:
                     del rates[key]
-            second, count = rates.get(address, (now, 0))
-            rates[address] = (now, count + 1 if second == now else 1)
-            return rates[address][1] <= 30
+            second, count = rates.get(bucket, (now, 0))
+            rates[bucket] = (now, count + 1 if second == now else 1)
+            return rates[bucket][1] <= (120 if bulk else 30)
 
     def token(self):
         value = self.headers.get('Authorization', '').removeprefix('Bearer ')

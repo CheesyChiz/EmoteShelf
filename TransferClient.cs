@@ -10,6 +10,7 @@ namespace EmoteShelf;
 
 internal sealed record PackageOffer(string Id, string Name, int Size, string Sha256, string State, bool Incoming, int Offset, int Remaining, string Launch = "");
 internal sealed record ReceivedPackage(string Id, byte[] Bytes);
+internal sealed record DownloadProgress(string Id, int Bytes, bool Verified = false);
 
 internal sealed class TransferClient : IDisposable
 {
@@ -28,6 +29,8 @@ internal sealed class TransferClient : IDisposable
     private PackageOffer? offer;
     private PackageOffer? acceptedOffer;
     private ReceivedPackage? received;
+    private DownloadProgress? downloadProgress;
+    internal DownloadProgress? Download => Volatile.Read(ref downloadProgress);
     private byte[]? outgoing;
     private int proposalPending;
     internal bool ProposalPending => Volatile.Read(ref proposalPending) != 0;
@@ -153,11 +156,21 @@ internal sealed class TransferClient : IDisposable
                     else if (!next.Incoming && outgoing is { } uploadPayload)
                     {
                         if (outgoingId.Length == 0) outgoingId = next.Id;
-                        if (next.Id == outgoingId && next.State == "accepted")
+                        while (next.Id == outgoingId && next.State == "accepted" && commands.IsEmpty)
                         {
                             var offset = next.Offset;
-                            await Send(new { action = "upload", id = next.Id, offset,
-                                chunk = Convert.ToBase64String(uploadPayload, offset, Math.Min(256*1024, uploadPayload.Length-offset)) });
+                            var count = Math.Min(256*1024, uploadPayload.Length-offset);
+                            if (count <= 0) throw new InvalidDataException("transfer_response");
+                            var acknowledgement = await Send(new { action = "upload", id = next.Id, offset,
+                                chunk = Convert.ToBase64String(uploadPayload, offset, count) });
+                            var confirmed = acknowledgement.GetProperty("transfer").Deserialize<PackageOffer>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                            if (confirmed is null || confirmed.Id != next.Id || confirmed.Incoming || confirmed.Size != next.Size ||
+                                confirmed.Sha256 != next.Sha256 || confirmed.Offset != offset + count ||
+                                confirmed.State != (confirmed.Offset == confirmed.Size ? "ready" : "accepted"))
+                                throw new InvalidDataException("transfer_response");
+                            next = confirmed;
+                            Volatile.Write(ref offer, next);
+                            failures = 0;
                         }
                         if (next.State == "ready") outgoing = null;
                     }
@@ -167,16 +180,19 @@ internal sealed class TransferClient : IDisposable
                         if (accepted is null || accepted.Id != next.Id || accepted.Sha256 != next.Sha256 || accepted.Size != next.Size || accepted.Name != next.Name || accepted.Launch != next.Launch)
                             throw new InvalidDataException("transfer_hash");
                         var payload = new byte[next.Size]; var offset = 0;
-                        while (offset < payload.Length)
+                        Volatile.Write(ref downloadProgress, new(next.Id, 0));
+                        while (offset < payload.Length && commands.IsEmpty)
                         {
                             var data = await Send(new { action = "download", id = next.Id, offset });
                             var chunk = Convert.FromBase64String(data.GetProperty("chunk").GetString()!);
                             if (chunk.Length is 0 or > 256*1024 || offset+chunk.Length > payload.Length) throw new InvalidDataException("transfer_chunk");
                             chunk.CopyTo(payload, offset); offset += chunk.Length;
-                            await Task.Delay(100, stop.Token);
+                            Volatile.Write(ref downloadProgress, new(next.Id, offset));
                         }
+                        if (offset < payload.Length) continue; // Process cancellation before downloading more bytes.
                         if (Convert.ToHexStringLower(SHA256.HashData(payload)) != next.Sha256) throw new InvalidDataException("transfer_hash");
                         ModPackage.Validate(payload);
+                        Volatile.Write(ref downloadProgress, new(next.Id, payload.Length, true));
                         downloadedId = next.Id;
                         Volatile.Write(ref received, new ReceivedPackage(next.Id, payload));
                     }
@@ -198,7 +214,7 @@ internal sealed class TransferClient : IDisposable
                     // Poll again before retrying uploads: a timed-out response may have
                     // committed its chunk already. The relay offset is authoritative.
                     if ((stage is "upload" or "download" or "poll") &&
-                        (code is "transfer_timeout" or "transfer_network" or "transfer_http_502" or "transfer_http_503" or "transfer_http_504") && ++failures <= 3)
+                        (code is "transfer_timeout" or "transfer_network" or "transfer_http_429" or "transfer_http_502" or "transfer_http_503" or "transfer_http_504") && ++failures <= 3)
                     {
                         await Task.Delay(1000, stop.Token);
                         continue;
@@ -210,7 +226,7 @@ internal sealed class TransferClient : IDisposable
                     Volatile.Write(ref proposalPending, 0);
                     await Task.Delay(3000, stop.Token);
                 }
-                await Task.Delay(500, stop.Token);
+                await Task.Delay(500, stop.Token); // Idle/status polling only; chunks have no artificial delay.
             }
         }
         catch (OperationCanceledException) { }

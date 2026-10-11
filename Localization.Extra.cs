@@ -12,6 +12,12 @@ internal static partial class Localization
         }
     }
     private const string Additional = """
+{0:F1} MiB · transfer expires in {1}s|{0:F1} MiB · 転送期限まで{1}秒|{0:F1} MiB · Übertragung läuft in {1}s ab|{0:F1} Mio · expiration du transfert dans {1}s
+Uploading to relay|中継サーバーへアップロード中|Upload zum Relay|Envoi au relais
+Waiting for partner download and installation|相手のダウンロードとインストールを待機中|Warte auf Download und Installation beim Partner|En attente du téléchargement et de l’installation chez le partenaire
+Installing and enabling in Penumbra|Penumbraにインストールして有効化中|Installation und Aktivierung in Penumbra|Installation et activation dans Penumbra
+Checking checksum and archive|チェックサムとアーカイブを検証中|Prüfsumme und Archiv werden geprüft|Vérification de la somme de contrôle et de l’archive
+Downloading from relay|中継サーバーからダウンロード中|Download vom Relay|Téléchargement depuis le relais
 Use an exported PMP|エクスポート済みPMPを使用|Exportierte PMP verwenden|Utiliser un PMP exporté
 Mod to send|送信するMOD|Zu sendende Mod|Mod à envoyer
 Search mods|MODを検索|Mods suchen|Rechercher des mods

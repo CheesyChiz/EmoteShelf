@@ -83,15 +83,17 @@ internal static class TransferClientTests
             {
                 using (var entry = zip.CreateEntry("meta.json").Open()) entry.Write(Encoding.UTF8.GetBytes("{\"Name\":\"Test\",\"FileVersion\":3}"));
                 using (var entry = zip.CreateEntry("default_mod.json").Open()) entry.Write(Encoding.UTF8.GetBytes("{\"Files\":{\"chara/test.pap\":\"anim.pap\"}}"));
-                using (var entry = zip.CreateEntry("anim.pap").Open()) entry.Write(RandomNumberGenerator.GetBytes(700000));
+                using (var entry = zip.CreateEntry("anim.pap").Open()) entry.Write(RandomNumberGenerator.GetBytes(21 * 1024 * 1024));
             }
             relay.Upload = packed.ToArray();
             using var link = new LinkClient(new string('a', 64), relay);
             await Until(() => link.Snapshot.State == "linked");
             using var transfer = new TransferClient(link, Fake.Partner, relay);
+            var timer = System.Diagnostics.Stopwatch.StartNew();
             await transfer.ProposePackage(relay.Upload, "Test.pmp");
             await Until(() => transfer.Offer?.State == "ready");
             if (!relay.Upload.SequenceEqual(relay.Uploaded.ToArray())) throw new Exception("Resumed upload bytes differ");
+            Console.WriteLine($"Synthetic 21 MiB client upload including one lost acknowledgement: {timer.Elapsed.TotalSeconds:F2}s (in-memory transport, not Internet throughput).");
             transfer.Dispose(); await transfer.Completion;
             link.Dispose(); await link.Completion;
         }
@@ -121,6 +123,8 @@ internal static class TransferClientTests
                 ReceivedPackage? received = null;
                 await Until(() => (received ??= transfer.TakeReceived()) is not null);
                 if (!received!.Bytes.SequenceEqual(relay.Bytes)) throw new Exception("Package bytes changed");
+                if (transfer.Download is not { Verified: true } progress || progress.Id != Fake.Id || progress.Bytes != relay.Bytes.Length)
+                    throw new Exception("Download progress did not confirm verified byte count");
                 if (relay.Completed) throw new Exception("Completed before import confirmation");
                 transfer.Act("complete", Fake.Id);
                 await Until(() => relay.Completed);
