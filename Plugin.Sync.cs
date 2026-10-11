@@ -18,6 +18,8 @@ public sealed partial class Plugin
     private string resourceError = "", lastResourceDiagnostic = "";
     private long nextResourceDiagnostic;
     private long nextLocalResourceCheck;
+    private string missingResourcePath = "";
+    private long nextMissingResourceLog;
 
     private void StopPairSync()
     {
@@ -28,6 +30,8 @@ public sealed partial class Plugin
         resourceError = lastResourceDiagnostic = "";
         nextResourceDiagnostic = nextResourceCheck = 0;
         nextLocalResourceCheck = 0;
+        missingResourcePath = "";
+        nextMissingResourceLog = 0;
     }
     private Dictionary<string, string> ResolveResources(IEnumerable<string> paths, ushort actor)
     {
@@ -39,12 +43,24 @@ public sealed partial class Plugin
             if (!SyncRules.ValidPath(path)) throw new InvalidOperationException("resource_invalid_path");
             // GUID resolution searches persistent collection storage. Lightless uses
             // temporary actor collections; resolve through the actor association instead.
-            var file = resolveActorPath.Invoke(path, actor);
-            if (!Path.IsPathRooted(file))
+            var raw = resolveActorPath.Invoke(path, actor);
+            var file = ResourceProof.ResolvedFile(raw);
+            if (file.Length == 0)
+            {
+                missingResourcePath = path;
+                if (Environment.TickCount64 >= nextMissingResourceLog)
+                {
+                    nextMissingResourceLog = Environment.TickCount64 + 5000;
+                    Log.Warning("Pair resource mapping unavailable: actor={Actor} gamePath={GamePath} unchanged={Unchanged} wrapped={Wrapped}",
+                        actor == Objects.LocalPlayer?.ObjectIndex ? "local" : "partner", path,
+                        string.Equals(raw, path, StringComparison.OrdinalIgnoreCase), raw.StartsWith('|'));
+                }
                 throw new InvalidOperationException(actor == Objects.LocalPlayer?.ObjectIndex
                     ? "resource_local_not_mapped" : "resource_partner_not_mapped");
+            }
             result.Add(path, file);
         }
+        missingResourcePath = "";
         return result;
     }
     private bool PairResourcesReady()
@@ -171,7 +187,8 @@ public sealed partial class Plugin
         if (remote?.Error.Length > 0)
             return T("Не удалось обменяться проверкой файлов с сервером.", "Resource verification exchange with the server failed.") + " " + remote.Error;
         if (resourceError.Length > 0)
-            return T("Файлы анимации недоступны или не совпадают.", "Animation files are unavailable or do not match.") + " " + resourceError;
+            return T("Файлы анимации недоступны или не совпадают.", "Animation files are unavailable or do not match.") + " " + resourceError +
+                (missingResourcePath.Length == 0 ? "" : "\n" + missingResourcePath);
         return T("Ожидаем подтверждение файлов от второго клиента.", "Waiting for file confirmation from the other client.");
     }
     private unsafe bool ReadLocalPhase(out double phase, out double duration)

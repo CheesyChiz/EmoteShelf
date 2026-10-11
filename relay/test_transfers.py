@@ -7,6 +7,18 @@ from transfers import Transfers
 
 
 class TransferTests(unittest.TestCase):
+    def test_transfer_shared_dance_keeps_mode_and_same_command(self):
+        for user in (self.a, self.b): self.links.users[user]['dance'] = True
+        self.store.action(self.links, self.b, dict(action='poll'), protocol=5)
+        launch = json.dumps(dict(PairId='1'*64, Family='2'*64, SenderCommand=hashlib.sha256(b'/stepdance').hexdigest(),
+                                 SenderRole='4'*64, Command='/stepdance', Dance=True))
+        key = self.store.action(self.links, self.a, dict(self.offer, launch=launch), protocol=5)['transfer']['id']
+        self.act(self.b, action='accept', id=key)
+        self.act(self.a, action='upload', id=key, offset=0, chunk=base64.b64encode(self.payload).decode())
+        self.act(self.b, action='complete', id=key)
+        self.assertTrue(self.links.users[self.a]['offer']['dance'])
+        self.assertTrue(self.links.users[self.b]['offer']['dance'])
+
     def test_accept_retry_preserves_ready_payload_and_consent(self):
         key = self.act(self.a, **self.offer)['transfer']['id']
         for _ in range(2):

@@ -166,6 +166,12 @@ internal static class TransferClientTests
                 throw new Exception("Upload serialization changed package bytes");
         }
         var launch = new TransferLaunch("Wave", "/wave", null, new() { ["Style"] = ["Default"] });
+        var dance = launch with { Dance = true, PairId = new string('1', 64), Family = new string('2', 64),
+            SenderCommand = PairRules.Hash("/wave"), SenderRole = new string('3', 64) };
+        if (TransferLaunch.Decode(dance.Encode()) is not { Dance: true, Command: "/wave" })
+            throw new Exception("Shared dance transfer mode lost");
+        try { (dance with { Command = "/hum" }).Encode(); throw new Exception("Different dance commands accepted"); }
+        catch (InvalidDataException) { }
         using (var relay = new Fake(upload: true))
         {
             using var packed = new MemoryStream();

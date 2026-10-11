@@ -11,6 +11,7 @@ internal sealed record TransferLaunch(string Label, string Command, int? Pose,
     public string Family { get; init; } = "";
     public string SenderCommand { get; init; } = "";
     public string SenderRole { get; init; } = "";
+    public bool Dance { get; init; }
     internal string Encode()
     {
         var value = JsonSerializer.Serialize(this);
@@ -33,6 +34,9 @@ internal sealed record TransferLaunch(string Label, string Command, int? Pose,
             throw new InvalidDataException("transfer_launch_invalid");
         var pair = new[] { selection.PairId, selection.Family, selection.SenderCommand, selection.SenderRole };
         if (pair.Any(s => s != "") && pair.Any(s => s is null || !Regex.IsMatch(s, "^[0-9a-f]{64}$")))
+            throw new InvalidDataException("transfer_launch_invalid");
+        if (selection.Dance && (selection.PairId.Length == 0 ||
+            selection.SenderCommand != PairRules.Hash(selection.Command.ToLowerInvariant())))
             throw new InvalidDataException("transfer_launch_invalid");
         return selection;
     }

@@ -4,6 +4,17 @@ using System.Text.Json;
 namespace EmoteShelf;
 internal static class ResourceProof
 {
+    internal static string ResolvedFile(string value)
+    {
+        // Penumbra may prefix resolved resources with collection-specific metadata.
+        if (value.StartsWith('|'))
+        {
+            var separator = value.IndexOf('|', 1);
+            if (separator < 0) return "";
+            value = value[(separator + 1)..];
+        }
+        return !value.Contains('|') && Path.IsPathFullyQualified(value) ? value : "";
+    }
     internal static string[] Paths(string directory, Dictionary<string, string[]> options, string[] required)
     {
         var paths = new HashSet<string>(required, StringComparer.Ordinal);

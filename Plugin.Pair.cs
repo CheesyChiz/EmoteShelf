@@ -305,7 +305,8 @@ public sealed partial class Plugin
                 throw new InvalidOperationException(T("Пара отменена: движение, состояние или расстояние не подходят.", "Pair cancelled: character state or distance is unsuitable."));
             pairCheckpoint = "pose_setting";
             pairCheckpoint = "pair_transport";
-            if (snapshot.State == "error") throw new InvalidOperationException(snapshot.Error);
+            if (snapshot.State == "error") throw new InvalidOperationException(resourceError.Length > 0
+                ? ResourceExplanation() + "\n" + ResourceDiagnostic() : snapshot.Error);
             pairCheckpoint = "heartbeat";
             if (now - snapshot.ReceivedAt > 4000) throw new InvalidOperationException(T("Сервер не отвечает; запуск отменён.", "Relay stopped responding; launch cancelled."));
             var proposal = link?.Snapshot.Launch;

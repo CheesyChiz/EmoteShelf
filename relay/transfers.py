@@ -105,11 +105,17 @@ class Transfers:
                             if not all(isinstance(v, str) and re.fullmatch('[0-9a-f]{64}', v) for v in fields):
                                 raise ValueError('transfer_launch_invalid')
                             sender, receiver = links.users[item['sender']], links.users[item['receiver']]
+                            dance = launch.get('Dance', False)
+                            if type(dance) is not bool or (dance and (
+                                    not sender.get('dance') or not receiver.get('dance') or
+                                    not isinstance(launch.get('Command'), str) or
+                                    hashlib.sha256(launch['Command'].lower().encode()).hexdigest() != fields[2])):
+                                raise ValueError('transfer_launch_invalid')
                             if sender['offer'] or receiver['offer']:
                                 raise ValueError('transfer_busy')
                             sender['offer'] = receiver['offer'] = dict(id=fields[0], family=fields[1],
                                 command=fields[2], role=fields[3], sender=item['sender'],
-                                status='accepted', until=self.clock()+60)
+                                status='accepted', until=self.clock()+60, dance=dance)
                     self.terminal_receipts[token] = (key, self.clock()+self.TTL, action, peer)
                     self.finish(key, {'complete': 'completed', 'reject': 'declined', 'cancel': 'cancelled', 'fail': 'installation_failed'}[action])
                 elif action == 'upload' and not incoming and item['state'] == 'accepted' and set(data) == {'action', 'id', 'offset', 'chunk'}:

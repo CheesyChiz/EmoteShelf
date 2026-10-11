@@ -3,6 +3,11 @@ internal static class SyncTests
 {
     internal static void Run()
     {
+        var resolved = Path.Combine(Path.GetTempPath(), "pair-resource.pap");
+        if (ResourceProof.ResolvedFile(resolved) != resolved || ResourceProof.ResolvedFile("|collection|" + resolved) != resolved)
+            throw new Exception("Wrapped Penumbra resource path not normalized");
+        foreach (var invalid in new[] { "chara/test.pap", "|broken", "|collection|chara/test.pap", "|collection|", "" })
+            if (ResourceProof.ResolvedFile(invalid).Length != 0) throw new Exception("Unmapped resource treated as a local file");
         if (Math.Abs(SyncRules.Drift(.05, 9.95, 10)-.1) > .00001 || SyncRules.Drift(1, 11, 10) != 0)
             throw new Exception("Wrapped phase drift failed");
         foreach (var path in new[] { "../secret.pap", "C:/secret.pap", "chara/../../a.pap", "chara/a.dll" })

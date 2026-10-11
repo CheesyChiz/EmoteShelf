@@ -16,6 +16,7 @@ public sealed partial class Plugin
     private long transferModsRefresh;
     private bool transferManualPackage;
     private Bookmark? transferSenderRole, transferReceiverRole;
+    private bool transferSharedDance;
     private TransferLaunch? acceptedTransferLaunch;
     private string transferPartner = "", transferPath = "", transferMessage = "", lastTransferError = "";
     private bool transferAcknowledged;
@@ -165,6 +166,13 @@ public sealed partial class Plugin
                 importingDirectory = ""; importingOffer = "";
                 importStage = "";
                 Scan();
+                // Opening the UI is best-effort, independent of successful installation.
+                try
+                {
+                    var opened = openPenumbra.Invoke(TabType.Mods, installedDirectory);
+                    if (opened != PenumbraApiEc.Success) Log.Warning("Received mod page could not open: {Code}", opened);
+                }
+                catch (Exception ex) { Log.Warning("Received mod page could not open: {Type}", ex.GetType().Name); }
                 if (acceptedTransferLaunch is { } launch)
                 {
                     acceptedTransferLaunch = null;
@@ -355,6 +363,10 @@ public sealed partial class Plugin
             if (transferSenderRole is not null)
             {
                 ImGui.TextWrapped(T("Твоя роль: ", "Your role: ") + transferSenderRole.Name);
+                ImGui.Checkbox(T("Совместный танец — одна эмоция, 3 ялма между вами", "Shared dance — same emote, 3 yalms apart"), ref transferSharedDance);
+                if (transferSharedDance) transferReceiverRole = SnapshotBookmark(transferSenderRole);
+                else
+                {
                 if (ImGui.BeginCombo(T("Роль партнёра", "Partner role"), transferReceiverRole?.Name ?? "—"))
                 {
                     foreach (var mod in discovered.Where(m => m.Directory == transferSourceDirectory))
@@ -368,11 +380,12 @@ public sealed partial class Plugin
                     ImGui.EndCombo();
                 }
                 DrawTransferRoleOptions();
+                }
             }
             ImGui.TextWrapped(T("После установки: ", "After installation: ") + TransferLaunch.Decode(transferLaunchDraft)!.Label);
             if (ImGui.SmallButton(T("Без запуска", "Without playback"))) { transferLaunchDraft = ""; transferSenderRole = transferReceiverRole = null; }
         }
-        ImGui.BeginDisabled(config.TransferNoticeVersion != 1 || transfers is null || busy || (transferManualPackage ? transferPath.Length == 0 : !transferMods.ContainsKey(transferSourceDirectory)) || (transferSenderRole is not null && (transferReceiverRole is null || OfferRole(transferSenderRole) == OfferRole(transferReceiverRole))));
+        ImGui.BeginDisabled(config.TransferNoticeVersion != 1 || transfers is null || busy || (transferManualPackage ? transferPath.Length == 0 : !transferMods.ContainsKey(transferSourceDirectory)) || (transferSenderRole is not null && (transferReceiverRole is null || (!transferSharedDance && OfferRole(transferSenderRole) == OfferRole(transferReceiverRole)))));
         if (ImGui.Button(T("Предложить мод партнёру", "Offer mod to partner")))
         {
             transferImportFailed = false; importStage = "";
@@ -383,7 +396,7 @@ public sealed partial class Plugin
                 var family = PairRules.Hash("transfer-pair:" + id);
                 launch = new TransferLaunch(receiver.Name[..Math.Min(200, receiver.Name.Length)], receiver.Command, receiver.PoseIndex,
                     receiver.SavedOptions?.ToDictionary(p => p.Key, p => p.Value.ToList()) ?? [])
-                { PairId = id, Family = family, SenderCommand = PairRules.Hash(sender.Command.ToLowerInvariant()), SenderRole = OfferRole(sender) }.Encode();
+                { PairId = id, Family = family, SenderCommand = PairRules.Hash(sender.Command.ToLowerInvariant()), SenderRole = OfferRole(sender), Dance = transferSharedDance }.Encode();
                 queuedTransferPair = new(SnapshotBookmark(sender), id, family, transferPartner,
                     ClientState.TerritoryType, Environment.TickCount64 + 660000);
             }
@@ -447,6 +460,7 @@ public sealed partial class Plugin
                 "The package will be checked, installed separately and enabled in your current Penumbra collection, affecting all characters using it. Appearance, idle, sound and effects may change immediately; an emote command runs only with the playback offer below."));
             if (launch is not null)
             {
+                if (launch.Dance) ImGui.TextWrapped(T("Совместный танец — одна эмоция, 3 ялма между вами", "Shared dance — same emote, 3 yalms apart"));
                 ImGui.TextWrapped(T("После установки: ", "After installation: ") + launch.Label + " · " + launch.Command);
                 if (launch.Pose is { } pose) ImGui.TextUnformatted(T("Слот: ", "Slot: ") + pose.ToString("00"));
                 foreach (var option in launch.Options) ImGui.TextWrapped(option.Key + ": " + string.Join(", ", option.Value));
@@ -507,6 +521,7 @@ public sealed partial class Plugin
     private void PrepareTransferLaunch(Bookmark bookmark)
     {
         transferSenderRole = SnapshotBookmark(bookmark);
+        transferSharedDance = config.SharedDance;
         transferReceiverRole = config.Bookmarks.Where(b => b.ModDirectory == bookmark.ModDirectory && OfferRole(b) != OfferRole(bookmark))
             .Select(SnapshotBookmark).FirstOrDefault();
         if (transferReceiverRole is null)
@@ -516,6 +531,7 @@ public sealed partial class Plugin
             if (other is not null) transferReceiverRole = CreateBookmark(other, null);
         }
         transferSourceDirectory = bookmark.ModDirectory;
+        if (transferSharedDance) transferReceiverRole = SnapshotBookmark(bookmark);
         transferManualPackage = false;
         transferLaunchDraft = new TransferLaunch(bookmark.Name[..Math.Min(200, bookmark.Name.Length)], bookmark.Command,
             bookmark.PoseIndex, bookmark.SavedOptions?.ToDictionary(p => p.Key, p => p.Value.ToList()) ?? []).Encode();
