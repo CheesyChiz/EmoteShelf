@@ -6,11 +6,15 @@ using System.Security.Cryptography;
 
 internal static class TransferClientTests
 {
-    private sealed class Fake(bool corrupt = false, bool changeLaunch = false, bool upload = false, int loseComplete = 0) : HttpMessageHandler
+    private sealed class Fake(bool corrupt = false, bool changeLaunch = false, bool upload = false, int loseComplete = 0, int loseAccept = 0) : HttpMessageHandler
     {
         internal bool Accepted, Downloaded, Completed, Failed;
         internal int FailureAttempts;
         internal int CompleteAttempts;
+        internal int AcceptAttempts;
+        internal bool Rejected, Second;
+        internal const string SecondId = "cccccccccccccccccccccccccccccccc";
+        internal void NextOffer() { Accepted = false; Rejected = false; Second = true; }
         internal byte[]? Upload;
         internal readonly MemoryStream Uploaded = new();
         private bool dropped;
@@ -45,7 +49,18 @@ internal static class TransferClientTests
                         incoming = false, offset = Uploaded.Length, remaining = 600, launch = "" } };
                     return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(response)) };
                 }
-                if (action == "accept") Accepted = true;
+                if (action == "accept")
+                {
+                    AcceptAttempts++;
+                    if (!Second && (loseAccept == 3 || loseAccept == 1 && AcceptAttempts == 1))
+                        throw new TaskCanceledException("Lost accept before commit");
+                    Accepted = true;
+                    if (!Second && loseAccept == 2 && AcceptAttempts == 1)
+                        throw new TaskCanceledException("Lost accept after commit");
+                }
+                if (action == "reject") Rejected = true;
+                if (Rejected)
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"transfer\":null,\"outcome\":\"declined\"}") };
                 if (action == "complete")
                 {
                     CompleteAttempts++;
@@ -68,7 +83,7 @@ internal static class TransferClientTests
                     Downloaded = true;
                     response = new { chunk = Convert.ToBase64String(corrupt ? new byte[Bytes.Length] : Bytes) };
                 }
-                else response = new { transfer = Completed ? null : new { id = Id, name = "Test.pmp", size = Bytes.Length,
+                else response = new { transfer = Completed ? null : new { id = Second ? SecondId : Id, name = "Test.pmp", size = Bytes.Length,
                     sha256 = Convert.ToHexStringLower(SHA256.HashData(Bytes)), state = Accepted ? "ready" : "offered", incoming = true, offset = 0, remaining = 600,
                     launch = changeLaunch && Accepted ? new TransferLaunch("Changed", "/wave", null, []).Encode() : "" } };
             }
@@ -82,6 +97,31 @@ internal static class TransferClientTests
     }
     internal static async Task Run()
     {
+        foreach (var mode in new[] { 1, 2, 3 })
+        {
+            using var relay = new Fake(loseAccept: mode);
+            using var link = new LinkClient(new string('a', 64), relay);
+            await Until(() => link.Snapshot.State == "linked");
+            using var transfer = new TransferClient(link, Fake.Partner, relay);
+            await Until(() => transfer.Offer is not null);
+            transfer.Accept(Fake.Id);
+            transfer.Accept(Fake.Id); // Repeated UI click must not enqueue another acceptance.
+            if (mode == 3)
+            {
+                await Until(() => relay.Rejected && transfer.Offer is null);
+                if (relay.AcceptAttempts != 4 || relay.Downloaded) throw new Exception("Acceptance retry bound failed");
+                relay.NextOffer();
+                await Until(() => transfer.Offer?.Id == Fake.SecondId);
+                if (transfer.Error.Length != 0 || transfer.Download is not null) throw new Exception("Previous failure leaked into new offer");
+                transfer.Accept(Fake.SecondId);
+            }
+            ReceivedPackage? received = null;
+            await Until(() => (received ??= transfer.TakeReceived()) is not null);
+            if (received!.Id != (mode == 3 ? Fake.SecondId : Fake.Id) || transfer.Error.Length != 0 ||
+                relay.AcceptAttempts != (mode == 3 ? 5 : 2)) throw new Exception("Acceptance recovery failed");
+            transfer.Dispose(); await transfer.Completion;
+            link.Dispose(); await link.Completion;
+        }
         foreach (var mode in new[] { 1, 2 })
         {
             using var relay = new Fake(loseComplete: mode);

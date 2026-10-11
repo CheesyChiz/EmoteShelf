@@ -86,8 +86,10 @@ class Transfers:
                 if not item or token not in (item['sender'], item['receiver']):
                     raise ValueError('transfer_expired')
                 incoming = token == item['receiver']
-                if action == 'accept' and incoming and item['state'] == 'offered' and set(data) == {'action', 'id'}:
-                    item['state'] = 'accepted'
+                if action == 'accept' and incoming and set(data) == {'action', 'id'}:
+                    # A lost reply may be retried after upload has already finished.
+                    if item['state'] == 'offered':
+                        item['state'] = 'accepted'
                 elif action in ('reject', 'complete', 'cancel', 'fail') and set(data) == {'action', 'id'}:
                     if (action in ('reject', 'complete', 'fail') and not incoming) or (action == 'cancel' and incoming):
                         raise ValueError('transfer_role')

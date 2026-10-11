@@ -22,7 +22,7 @@ internal sealed class TransferClient : IDisposable
     private readonly Action<string>? diagnostic;
     private string stage = "poll", failedId = "";
     private int failures;
-    private object? pendingTerminal;
+    private object? pendingControl;
     // This is an application/json HTTP body, never HTML. Preserve Base64 '+' bytes
     // instead of expanding them to six-byte Unicode escapes beyond the relay limit.
     internal static JsonContent RequestContent(object message) => JsonContent.Create(message,
@@ -138,14 +138,14 @@ internal sealed class TransferClient : IDisposable
                 {
                     (object Message, byte[]? Payload) command = default;
                     var queued = false;
-                    if (pendingTerminal is not null)
+                    if (pendingControl is not null)
                     {
-                        command = (pendingTerminal, null);
+                        command = (pendingControl, null);
                         queued = true;
                     }
                     else queued = commands.TryDequeue(out command);
-                    if (queued && JsonSerializer.SerializeToElement(command.Message).GetProperty("action").GetString() is "fail" or "complete" or "reject" or "cancel")
-                        pendingTerminal = command.Message;
+                    if (queued && JsonSerializer.SerializeToElement(command.Message).GetProperty("action").GetString() is "accept" or "fail" or "complete" or "reject" or "cancel")
+                        pendingControl = command.Message;
                     if (queued && command.Payload is not null) outgoing = command.Payload;
                     var result = await Send(queued ? command.Message : new { action = "poll" });
                     var raw = result.GetProperty("transfer");
@@ -156,8 +156,16 @@ internal sealed class TransferClient : IDisposable
                         next.Id.Length != 32 || !next.Id.All(char.IsAsciiHexDigit) || next.Sha256.Length != 64 || !next.Sha256.All(char.IsAsciiHexDigit) ||
                         next.Name.Length > 100 || next.Name.Any(char.IsControl) || next.State is not ("offered" or "accepted" or "ready")))
                         throw new InvalidDataException("transfer_response");
-                    pendingTerminal = null;
+                    pendingControl = null;
                     var previous = offer;
+                    if (next is not null && next.Id != previous?.Id && next.Id != failedId)
+                    {
+                        // Failure/progress belong to one package, not the connection.
+                        failedId = "";
+                        failures = 0;
+                        Volatile.Write(ref error, "");
+                        Volatile.Write(ref downloadProgress, null);
+                    }
                     Volatile.Write(ref offer, next);
                     if (next is not null) Volatile.Write(ref outcome, "");
                     if (failedId.Length == 0) Volatile.Write(ref error, "");
@@ -224,14 +232,14 @@ internal sealed class TransferClient : IDisposable
                     Volatile.Write(ref error, code);
                     // Poll again before retrying uploads: a timed-out response may have
                     // committed its chunk already. The relay offset is authoritative.
-                    if ((stage is "upload" or "download" or "poll" or "fail" or "complete" or "reject" or "cancel") &&
+                    if ((stage is "upload" or "download" or "poll" or "accept" or "fail" or "complete" or "reject" or "cancel") &&
                         (code is "transfer_timeout" or "transfer_network" or "transfer_http_429" or "transfer_http_502" or "transfer_http_503" or "transfer_http_504") && ++failures <= 3)
                     {
                         await Task.Delay(1000, stop.Token);
                         continue;
                     }
                     // Keep errors visible; never repeatedly retry a rejected archive automatically.
-                    pendingTerminal = null;
+                    pendingControl = null;
                     failedId = offer?.Id ?? "";
                     if (offer is { Incoming: true } bad && acceptedId == bad.Id) downloadedId = bad.Id;
                     outgoing = null;

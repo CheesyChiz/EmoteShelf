@@ -7,6 +7,20 @@ from transfers import Transfers
 
 
 class TransferTests(unittest.TestCase):
+    def test_accept_retry_preserves_ready_payload_and_consent(self):
+        key = self.act(self.a, **self.offer)['transfer']['id']
+        for _ in range(2):
+            self.assertEqual(self.act(self.b, action='accept', id=key)['transfer']['state'], 'accepted')
+        self.act(self.a, action='upload', id=key, offset=0, chunk=base64.b64encode(self.payload).decode())
+        ready = self.act(self.b, action='accept', id=key)['transfer']
+        self.assertEqual((ready['state'], ready['offset']), ('ready', len(self.payload)))
+        self.assertEqual(bytes(self.store.items[key]['payload']), self.payload)
+        with self.assertRaises(ValueError): self.act(self.a, action='accept', id=key)
+        with self.assertRaises(ValueError): self.act(self.c, action='accept', id=key)
+        self.act(self.b, action='reject', id=key)
+        with self.assertRaises(ValueError): self.act(self.b, action='accept', id=key)
+        self.assertFalse(self.store.items)
+
     def test_completed_outcome_survives_lost_response_and_duplicate_command(self):
         key = self.act(self.a, **self.offer)['transfer']['id']
         self.act(self.b, action='accept', id=key)

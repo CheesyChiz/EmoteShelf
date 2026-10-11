@@ -20,6 +20,7 @@ public sealed partial class Plugin
     private string transferPartner = "", transferPath = "", transferMessage = "", lastTransferError = "";
     private bool transferAcknowledged;
     private string lastTransferOutcome = "";
+    private string displayedTransferId = "";
     private Task? transferSending;
     private Task<string>? transferExtracting;
     private CancellationTokenSource? transferExtractionCancellation;
@@ -39,6 +40,7 @@ public sealed partial class Plugin
     {
         transferExtractionCancellation?.Cancel();
         transfers?.Dispose(); transfers = null; transferPartner = "";
+        displayedTransferId = ""; lastTransferError = ""; lastTransferOutcome = "";
     }
 
     private void UpdateTransfers()
@@ -52,6 +54,18 @@ public sealed partial class Plugin
             }
         }
         else if (transfers is not null) StopTransfers();
+        if (transfers?.Offer is { } visibleOffer && visibleOffer.Id != displayedTransferId)
+        {
+            displayedTransferId = visibleOffer.Id;
+            if (transferExtracting is null && importingDirectory.Length == 0)
+            {
+                transferImportFailed = false;
+                importStage = "";
+                transferMessage = "";
+                lastTransferError = "";
+            }
+        }
+        if (transfers?.Error.Length == 0) lastTransferError = "";
         if (transfers is { Error.Length: > 0 } client && client.Error != lastTransferError)
         {
             lastTransferError = client.Error;
@@ -469,6 +483,9 @@ public sealed partial class Plugin
             transferAcceptCollection = collection.Id;
             transferAcceptIdentity = LinkIdentity(player);
             transferAcceptOffer = offer.Id;
+            transferImportFailed = false;
+            transferMessage = "";
+            lastTransferError = "";
             acceptedTransferLaunch = TransferLaunch.Decode(offer.Launch);
             config.TransferReceiveNoticeVersion = 1;
             Save();
