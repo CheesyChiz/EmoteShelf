@@ -139,7 +139,7 @@ try
     var songRoot = Path.Combine(testRoot, "SongFixture");
     Directory.CreateDirectory(songRoot);
     File.WriteAllText(Path.Combine(songRoot, "meta.json"), """
-        {"DefaultData":{"Files":{"chara/human/c0101/animation/a0001/bt_common/emote/j_pose01_loop.pap":"base.pap"}},
+        {"DefaultData":{"Files":{"chara/human/c0101/animation/a0001/bt_common/emote/j_pose01_loop.pap":"base.pap","sound/base.scd":"base.scd"}},
         "Groups":[{"Name":"Song","Type":"Single","Options":[
         {"Name":"To Zanarkand","Files":{"sound/guitar.scd":"song1.scd"}},
         {"Name":"Town","Files":{"sound/guitar.scd":"song2.scd"}},
@@ -153,6 +153,7 @@ try
     if (!song.Variants.Single(v => v.Option == "Town").HasSound || song.Variants.Single(v => v.Option == "None").HasSound)
         throw new Exception("Selected sound resources were not distinguished from silent variants.");
     var empty = song.Variants.Single(v => v.Option == "Base style");
+    if (!song.BaseHasSound) throw new Exception("Penumbra v4 DefaultData sound was not detected.");
     if (empty.Paths.Length != 0 || empty.Files.Count != 0 || !ModScanner.VariantApplies(empty, song, _ => false))
         throw new Exception("Base-only choice lost or rejected.");
     var raceOverride = new EmoteVariant("PAP", "PAP", ["other-race.pap"], null);

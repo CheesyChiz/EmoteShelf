@@ -55,6 +55,7 @@ public sealed partial class Plugin : IDalamudPlugin
     private bool redrawCompleted;
     private readonly SoundRestart soundRestart = new();
     private ulong soundRestartActor;
+    private Action? applySoundSettings;
     private int pendingPoseIndex = -1;
     private EmoteController.PoseType pendingPoseType = EmoteController.PoseType.GroundSit;
     private long poseAt;
@@ -216,6 +217,7 @@ public sealed partial class Plugin : IDalamudPlugin
         RestoreOffset();
         if (!pairPreparation) lastAcceptedPair = null;
         soundRestart.Reset();
+        applySoundSettings = null;
         if (!pairPreparation) CancelPair();
         manualPoseBookmark = null;
         launchingBookmark = bookmark;
@@ -251,9 +253,6 @@ public sealed partial class Plugin : IDalamudPlugin
             }
             var (valid, _, collection) = getCollection.Invoke(player.ObjectIndex);
             if (!valid || collection.Id == Guid.Empty) throw new InvalidOperationException(T("Не удалось определить коллекцию персонажа.", "Could not determine the character's collection."));
-            if (activeCollection != Guid.Empty && activeCollection != collection.Id) removeTemporary.Invoke(activeCollection, TemporaryKey);
-            removeTemporary.Invoke(collection.Id, TemporaryKey);
-            activeCollection = collection.Id;
 
             // Unconfigured, unrelated mods must not block playback of the selected mod.
             var (allEc, allSettings) = getAllSettings.Invoke(collection.Id, false, false, TemporaryKey);
@@ -265,18 +264,32 @@ public sealed partial class Plugin : IDalamudPlugin
             IReadOnlyDictionary<string, IReadOnlyList<string>> selectedOptions = bookmark.SavedOptions is null
                 ? ReadModOptions(collection.Id, selected).ToDictionary(x => x.Key, x => (IReadOnlyList<string>)x.Value)
                 : bookmark.SavedOptions.ToDictionary(x => x.Key, x => (IReadOnlyList<string>)x.Value);
+            void ApplySelectedSettings()
+            {
+            var (stillValid, _, currentCollection) = getCollection.Invoke(player.ObjectIndex);
+            if (!stillValid || currentCollection.Id != collection.Id)
+                throw new InvalidOperationException("sound_restart_collection_changed");
+            if (activeCollection != Guid.Empty && activeCollection != collection.Id) removeTemporary.Invoke(activeCollection, TemporaryKey);
+            removeTemporary.Invoke(collection.Id, TemporaryKey);
+            activeCollection = collection.Id;
             var ecSet = setTemporary.Invoke(collection.Id, selected.Directory, false, true,
                 priority, selectedOptions, "Emote Shelf", TemporaryKey);
             if (ecSet != PenumbraApiEc.Success && ecSet != PenumbraApiEc.NothingChanged)
                 throw new InvalidOperationException(string.Format(T("Не удалось переключить {0}: {1}", "Could not switch {0}: {1}"), selected.Name, ecSet));
+            }
             redrawCompleted = false;
             redrawDeadline = Environment.TickCount64 + 1600;
-            if (SoundRestart.Needed(bookmark.Command, IsPlayingLoop(), selected, selectedOptions))
+            var restartSound = SoundRestart.Needed(bookmark.Command, IsPlayingEmote(), selected, selectedOptions);
+            Log.Information("Sound restart decision: required={Required} baseSound={BaseSound} variantSound={VariantSound}",
+                restartSound, selected.BaseHasSound, selected.Variants.Any(v => v.HasSound));
+            if (restartSound)
             {
+                applySoundSettings = ApplySelectedSettings;
                 soundRestartActor = player.GameObjectId;
                 soundRestart.Begin();
-                Log.Information("Sound restart: selected sound resources; settings applied; redraw queued");
+                Log.Information("Sound restart: preserving previous resources until emote stops");
             }
+            else ApplySelectedSettings();
             try { if (!IsPoseCommand(bookmark.Command) && soundRestart.Stage == SoundRestart.State.Inactive) redraw.Invoke(player.ObjectIndex, RedrawType.Redraw); }
             catch (Exception ex) { redrawCompleted = true; Log.Warning(ex, "Redraw failed; animation may remain cached"); }
             pendingCommand = bookmark.Command.Trim();
@@ -408,6 +421,9 @@ public sealed partial class Plugin : IDalamudPlugin
                                 throw new InvalidOperationException("sound_restart_idle_timeout");
                             return;
                         }
+                        applySoundSettings?.Invoke();
+                        applySoundSettings = null;
+                        Log.Information("Sound restart: neutral state stable; new settings applied after stop");
                         soundRestart.Requested(Environment.TickCount64);
                         redraw.Invoke(soundActor.ObjectIndex, RedrawType.Redraw);
                         Log.Information("Sound restart: neutral state stable; refreshing selected resources");
@@ -418,11 +434,13 @@ public sealed partial class Plugin : IDalamudPlugin
                     if (stage != SoundRestart.State.Ready) return;
                     Log.Information("Sound restart: redraw settled; validating prepared mod before playback");
                     soundRestart.Reset();
+                    applySoundSettings = null;
                 }
                 catch (Exception ex)
                 {
                     pendingCommand = ""; pendingPoseIndex = -1;
                     soundRestart.Reset();
+                    applySoundSettings = null;
                     status = ex.Message == "sound_restart_idle_timeout"
                         ? T("Предыдущая эмоция не завершилась. Останови её вручную и повтори запуск.", "The previous emote did not stop. Cancel it manually and retry.")
                         : T("Не удалось подтвердить перерисовку для перезапуска звука. Анимация не запущена; попробуй ещё раз.",
@@ -584,8 +602,15 @@ public sealed partial class Plugin : IDalamudPlugin
         => Objects.LocalPlayer is { } player && ((Character*)player.Address)->Mode is
             CharacterModes.EmoteLoop or CharacterModes.InPositionLoop;
 
+    private unsafe bool IsPlayingEmote()
+        => IsPlayingLoop() || Objects.LocalPlayer is { } player &&
+            ((Character*)player.Address)->EmoteController.EmoteId != 0;
+
     private unsafe void StopSoundEmote()
     {
+        // Non-loop emotes finish naturally; do not force a mode transition on them.
+        // AwaitIdle still requires EmoteId == 0, with the same bounded timeout.
+        if (Objects.LocalPlayer is { } normalPlayer && CanPair(normalPlayer)) return;
         if (Objects.LocalPlayer is not { } player || !CanRestartActor(player))
             throw new InvalidOperationException("sound_restart_actor_state");
         // Invoke the game's state transition, never clear sound handles or write mode bytes.

@@ -55,7 +55,8 @@ public static partial class ModScanner
                 {
                     using var doc = JsonDocument.Parse(File.ReadAllText(full));
                     CollectAssetTypes(doc.RootElement, assetTypes);
-                    if (Path.GetFileName(full).Equals("default_mod.json", StringComparison.OrdinalIgnoreCase))
+                    if (Path.GetFileName(full).Equals("default_mod.json", StringComparison.OrdinalIgnoreCase) ||
+                        Path.GetFileName(full).Equals("meta.json", StringComparison.OrdinalIgnoreCase))
                         baseHasSound |= DirectHasSound(doc.RootElement);
                     if (Path.GetFileName(full).Equals("meta.json", StringComparison.OrdinalIgnoreCase)
                         && doc.RootElement.TryGetProperty("Description", out var d)) description = d.GetString() ?? "";
