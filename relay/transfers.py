@@ -11,6 +11,7 @@ class Transfers:
     MAX_PACKAGE = 128 * 1024 * 1024
     MAX_TOTAL = 128 * 1024 * 1024
     CHUNK = 256 * 1024
+    WINDOW = 2 * 1024 * 1024
     TTL = 600
 
     def __init__(self, clock=time.monotonic):
@@ -46,6 +47,9 @@ class Transfers:
             user['transfer_protocol'] = protocol
             action = data.get('action')
             if action == 'offer':
+                streaming = protocol >= 7
+                if streaming and links.users[peer].get('transfer_protocol', 0) < 7:
+                    raise ValueError('transfer_update_both_clients')
                 if set(data) not in ({'action', 'name', 'size', 'sha256'}, {'action', 'name', 'size', 'sha256', 'launch'}):
                     raise ValueError('transfer_schema')
                 launch = data.get('launch', '')
@@ -66,11 +70,13 @@ class Transfers:
                     raise ValueError('transfer_size_or_hash')
                 if token in self.cooldowns or len(self.items) >= 32 or any(token in (v['sender'], v['receiver']) or peer in (v['sender'], v['receiver']) for v in self.items.values()):
                     raise ValueError('transfer_busy')
-                if sum(v['size'] for v in self.items.values()) + size > self.MAX_TOTAL:
+                reserved = self.WINDOW if streaming else size
+                if sum(self.WINDOW if v.get('streaming') else v['size'] for v in self.items.values()) + reserved > self.MAX_TOTAL:
                     raise ValueError('transfer_quota')
                 key = secrets.token_hex(16)
                 self.items[key] = dict(id=key, sender=token, receiver=peer, name=name,
-                                       size=size, sha256=sha, launch=launch, expires=self.clock()+self.TTL, state='offered', payload=bytearray())
+                                       size=size, sha256=sha, launch=launch, expires=self.clock()+self.TTL, state='offered', payload=bytearray(),
+                                       streaming=streaming, base=0, uploaded=0, hasher=hashlib.sha256())
                 self.cooldowns[token] = self.clock()+30
                 self.outcomes.pop(token, None)
                 self.outcomes.pop(peer, None)
@@ -94,6 +100,8 @@ class Transfers:
                     if (action in ('reject', 'complete', 'fail') and not incoming) or (action == 'cancel' and incoming):
                         raise ValueError('transfer_role')
                     if action in ('complete', 'fail') and item['state'] != 'ready':
+                        raise ValueError('transfer_not_ready')
+                    if action == 'complete' and item['streaming'] and item['base'] != item['size']:
                         raise ValueError('transfer_not_ready')
                     if action == 'complete' and item['launch']:
                         try:
@@ -119,22 +127,34 @@ class Transfers:
                     self.terminal_receipts[token] = (key, self.clock()+self.TTL, action, peer)
                     self.finish(key, {'complete': 'completed', 'reject': 'declined', 'cancel': 'cancelled', 'fail': 'installation_failed'}[action])
                 elif action == 'upload' and not incoming and item['state'] == 'accepted' and set(data) == {'action', 'id', 'offset', 'chunk'}:
-                    if type(data['offset']) is not int or data['offset'] != len(item['payload']) or not isinstance(data['chunk'], str) or len(data['chunk']) > 4*((self.CHUNK+2)//3):
+                    if type(data['offset']) is not int or data['offset'] != item['uploaded'] or not isinstance(data['chunk'], str) or len(data['chunk']) > 4*((self.CHUNK+2)//3):
                         raise ValueError('transfer_chunk')
                     try:
                         chunk = base64.b64decode(data['chunk'], validate=True)
                     except Exception:
                         raise ValueError('transfer_chunk') from None
-                    if not 0 < len(chunk) <= self.CHUNK or len(item['payload']) + len(chunk) > item['size']:
+                    if not 0 < len(chunk) <= self.CHUNK or item['uploaded'] + len(chunk) > item['size']:
                         raise ValueError('transfer_chunk')
+                    if item['streaming'] and len(item['payload']) + len(chunk) > self.WINDOW:
+                        return self.snapshot(token)
                     item['payload'].extend(chunk)
-                    if len(item['payload']) == item['size']:
-                        if hashlib.sha256(item['payload']).hexdigest() != item['sha256']:
+                    item['uploaded'] += len(chunk)
+                    item['hasher'].update(chunk)
+                    if item['uploaded'] == item['size']:
+                        if item['hasher'].hexdigest() != item['sha256']:
                             self.finish(key, 'integrity_failed')
                             raise ValueError('transfer_hash')
                         item['state'] = 'ready'
-                elif action == 'download' and incoming and item['state'] == 'ready' and set(data) == {'action', 'id', 'offset'}:
+                elif action == 'download' and incoming and (item['state'] == 'ready' or (item['streaming'] and item['state'] == 'accepted')) and set(data) == {'action', 'id', 'offset'}:
                     offset = data['offset']
+                    if item['streaming']:
+                        if type(offset) is not int or not item['base'] <= offset <= item['uploaded']:
+                            raise ValueError('transfer_chunk')
+                        # The next offset acknowledges durable receipt of all preceding bytes.
+                        # Keep the current chunk for an identical retry after a lost response.
+                        del item['payload'][:offset-item['base']]
+                        item['base'] = offset
+                        return dict(chunk=base64.b64encode(item['payload'][:self.CHUNK]).decode())
                     if type(offset) is not int or not 0 <= offset < item['size']:
                         raise ValueError('transfer_chunk')
                     return dict(chunk=base64.b64encode(item['payload'][offset:offset+self.CHUNK]).decode())
@@ -147,5 +167,5 @@ class Transfers:
         # Retain the outcome until TTL/new offer: an HTTP response can be lost.
         return dict(outcome=self.outcomes.get(token, ('', 0))[0], transfer=None if not item else dict(
             **{k: item[k] for k in ('id', 'name', 'size', 'sha256', 'state', 'launch')},
-            incoming=token == item['receiver'], offset=len(item['payload']),
+            incoming=token == item['receiver'], offset=item['uploaded'], streaming=item['streaming'],
             remaining=max(0, int(item['expires']-self.clock()))))

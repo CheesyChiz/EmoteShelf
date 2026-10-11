@@ -24,16 +24,14 @@ public sealed partial class Plugin
                 missingModResume = null;
                 if (outcome == "completed" && proposal is null && pairSession is null)
                 {
-                    var previousMode = config.SharedDance;
-                    try { config.SharedDance = missingModDance; BeginPair(resume); }
-                    finally { config.SharedDance = previousMode; }
+                    BeginPair(resume, missingModDance);
                 }
             }
         }
         if (proposal is not { Status: "waiting" } request) return;
         if (request.Incoming)
         {
-            if (initialScanPending || requestedMissingMod == request.Offer.Id ||
+            if (initialScanPending || libraryScan is not null || requestedMissingMod == request.Offer.Id ||
                 discovered.Any(m => !IsCarrierCopy(m.Directory) && PairRules.Family(m.Name) == request.Offer.Family)) return;
             requestedMissingMod = request.Offer.Id;
             link?.Act("request_mod", invitation: request.Offer.Id);

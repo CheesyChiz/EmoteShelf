@@ -61,7 +61,7 @@ internal static class ResourceProof
             if (!SyncRules.ValidPath(game) || !Path.IsPathRooted(file)) throw new InvalidDataException("resource_unresolved");
             using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read);
             total += stream.Length;
-            if (stream.Length > 64*1024*1024 || total > 128*1024*1024) throw new InvalidDataException("resource_size");
+            if (stream.Length > ModPackage.MaxAsset || total > ModPackage.MaxExpanded) throw new InvalidDataException("resource_size");
             result.Add(new(game, Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant()));
         }
         return result.ToArray();

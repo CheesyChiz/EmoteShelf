@@ -42,6 +42,9 @@ public sealed partial class Plugin
         if (ImGui.IsItemHovered()) ImGui.SetTooltip(T("Роль и команда", "Role and command"));
         if (ImGui.BeginPopup("bookmarkEditor"))
         {
+            DrawEmoteCategory(b.ModDirectory, b.Command);
+            if (config.PairEnabled && ImGui.MenuItem(T("Запустить один раз в другом режиме", "Launch once in the other mode")))
+                BeginPair(SnapshotBookmark(b), !DefaultDance(b.ModDirectory, b.Command));
             b.RoleLabel ??= ""; b.Alias ??= "";
             DrawOffsetBookmark(b);
             DrawBrioBookmark(b);

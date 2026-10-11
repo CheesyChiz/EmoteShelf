@@ -129,7 +129,7 @@ public sealed partial class Plugin
            !Conditions[ConditionFlag.BetweenAreas51] && !Conditions[ConditionFlag.Jumping] &&
            ((Character*)player.Address)->Mode == CharacterModes.Normal;
 
-    private void BeginPair(Bookmark bookmark)
+    private void BeginPair(Bookmark bookmark, bool? dance = null)
     {
         if (link?.Snapshot.Launch is not null)
         {
@@ -138,7 +138,7 @@ public sealed partial class Plugin
             return;
         }
         var id = PairRules.Hash(Guid.NewGuid().ToString());
-        BeginPairCore(bookmark, id, dance: config.SharedDance);
+        BeginPairCore(bookmark, id, dance: dance ?? DefaultDance(bookmark.ModDirectory, bookmark.Command));
         if (pairSession is not null && pairBookmark is not null)
         {
             var mod = discovered.First(m => m.Directory == bookmark.ModDirectory && m.Command.Equals(bookmark.Command, StringComparison.OrdinalIgnoreCase));
@@ -170,7 +170,7 @@ public sealed partial class Plugin
             if (dance && (IsPoseCommand(bookmark.Command) || bookmark.Command == "/sit"))
                 throw new InvalidOperationException(T("Для совместного танца выбери обычную эмоцию, не сидячую позу.", "Choose a regular emote for a shared dance, not a sitting pose."));
             if (!PairRules.NearbyForMode(local.Position, target.Position, dance))
-                throw new InvalidOperationException(T("Подойдите ближе: максимум 2 ялма, на одном уровне.", "Move closer: within 2 yalms and on the same level."));
+                throw new InvalidOperationException(T("Подойдите ближе: максимум 10 ялмов, на одном уровне.", "Move closer: within 10 yalms and on the same level."));
             if (!ModScanner.ValidCommand(bookmark.Command))
                 throw new InvalidOperationException(T("Эмоция недоступна.", "Emote is unavailable."));
             var mod = discovered.FirstOrDefault(m => m.Directory == bookmark.ModDirectory && m.Command.Equals(bookmark.Command, StringComparison.OrdinalIgnoreCase))
@@ -490,7 +490,7 @@ public sealed partial class Plugin
     }
     private void DrawPairSettings()
     {
-        DrawPairModeSelector();
+        ImGui.TextWrapped(T("Категория запуска задаётся в карточке эмоции или настройках закладки.", "Set the launch category on the emote card or in bookmark settings."));
         if (ImGui.Checkbox(T("Запуск в паре — экспериментально", "Pair launch — experimental"), ref config.PairEnabled)) { StopLink(); Save(); }
         if (!config.PairEnabled) return;
         DrawLinkSettings();

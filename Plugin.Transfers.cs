@@ -166,7 +166,7 @@ public sealed partial class Plugin
                     "The mod was installed and enabled in the selected Penumbra collection. No emote command was sent.");
                 importingDirectory = ""; importingOffer = "";
                 importStage = "";
-                Scan();
+                Scan(onlyDirectory: installedDirectory);
                 // Opening the UI is best-effort, independent of successful installation.
                 try
                 {
@@ -401,7 +401,7 @@ public sealed partial class Plugin
                 DrawTransferRoleOptions(transferSenderRole);
                 ImGui.PopID();
                 if (ImGui.Checkbox(T("Совместный танец — одна эмоция, 2 ялма между вами", "Shared dance — same emote, 2 yalms apart"), ref transferSharedDance))
-                { config.SharedDance = transferSharedDance; Save(); }
+                { /* This offer only; the saved category is unchanged. */ }
                 if (transferSharedDance) transferReceiverRole = SnapshotBookmark(transferSenderRole);
                 else
                 {
@@ -463,7 +463,7 @@ public sealed partial class Plugin
         if (!transferImportFailed && (offer.State is "accepted" or "ready"))
         {
             var downloaded = transfers.Download is { } p && p.Id == offer.Id ? p : null;
-            var downloading = offer.Incoming && offer.State == "ready";
+            var downloading = offer.Incoming && (offer.State == "ready" || offer.Streaming && offer.State == "accepted");
             var bytes = Math.Clamp(downloading ? downloaded?.Bytes ?? 0 : offer.Offset, 0, offer.Size);
             var label = offer.State == "accepted"
                 ? T("Загрузка на сервер", "Uploading to relay")
@@ -558,10 +558,10 @@ public sealed partial class Plugin
         ImGui.End();
     }
 
-    private void PrepareTransferLaunch(Bookmark bookmark)
+    private void PrepareTransferLaunch(Bookmark bookmark, bool? dance = null)
     {
         transferSenderRole = SnapshotBookmark(bookmark);
-        transferSharedDance = config.SharedDance;
+        transferSharedDance = dance ?? DefaultDance(bookmark.ModDirectory, bookmark.Command);
         transferReceiverRole = config.Bookmarks.Where(b => b.ModDirectory == bookmark.ModDirectory && OfferRole(b) != OfferRole(bookmark))
             .Select(SnapshotBookmark).FirstOrDefault();
         if (transferReceiverRole is null)

@@ -11,8 +11,10 @@ public static class PairRules
     public static Vector3 DancePosition(Vector3 anchor, float yaw)
         => anchor + new Vector3(MathF.Cos(yaw) * 2, 0, -MathF.Sin(yaw) * 2);
     public static bool NearbyForMode(Vector3 a, Vector3 b, bool dance)
-        => dance ? float.IsFinite(a.X + a.Y + a.Z + b.X + b.Y + b.Z) &&
-            Vector3.Distance(a, b) <= 5 && MathF.Abs(a.Y - b.Y) <= .25f : Nearby(a, b);
+        => WithinApproachRange(a, b, 10);
+    public static bool WithinApproachRange(Vector3 a, Vector3 b, float maximum)
+        => float.IsFinite(a.X + a.Y + a.Z + b.X + b.Y + b.Z) &&
+            Vector3.Distance(a, b) <= maximum && MathF.Abs(a.Y - b.Y) <= .25f;
     public static bool ReadyToLaunch(Vector3 a, float yawA, Vector3 b, float yawB)
         => Vector3.Distance(a, b) <= LaunchDistanceTolerance && AngleDistance(yawA, yawB) <= .01f;
     public static bool CanFineCorrect(Vector3 from, Vector3 to, float yaw)

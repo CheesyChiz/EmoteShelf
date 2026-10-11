@@ -124,7 +124,7 @@ class Handler(BaseHTTPRequestHandler):
         address = self.headers.get('X-Forwarded-For', self.client_address[0]).split(',')[0].strip()
         # Bulk chunks must not consume the pair/control request budget. Package,
         # body, capability, TTL and storage limits remain enforced independently.
-        bulk = self.path in ('/v4/transfer', '/v5/transfer')
+        bulk = self.path in ('/v4/transfer', '/v5/transfer', '/v7/transfer')
         bucket = (address, bulk)
         now = int(time.monotonic())
         with rate_lock:
@@ -166,7 +166,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(data, dict):
                     raise ValueError('sync_schema')
                 return self.reply(200, exchange(links, self.token(), data))
-            if self.path in ('/v4/transfer', '/v5/transfer'):
+            if self.path in ('/v4/transfer', '/v5/transfer', '/v7/transfer'):
                 length = int(self.headers.get('Content-Length', '0'))
                 if not 0 < length <= 360000:
                     return self.reply(413, dict(error='transfer_body_size'))
@@ -174,7 +174,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(data, dict):
                     raise ValueError('transfer_schema')
                 try:
-                    return self.reply(200, transfers.action(links, self.token(), data, protocol=5 if self.path == '/v5/transfer' else 4))
+                    return self.reply(200, transfers.action(links, self.token(), data, protocol=7 if self.path == '/v7/transfer' else 5 if self.path == '/v5/transfer' else 4))
                 except ValueError as ex:
                     return self.reply(400, dict(error=str(ex)))
             if self.path == '/v3/report':

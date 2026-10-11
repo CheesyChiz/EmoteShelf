@@ -5,6 +5,8 @@ import unittest
 import server
 import tempfile
 import os
+import base64
+import hashlib
 from reports import Reports
 
 
@@ -37,6 +39,38 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.request('GET', '/v1/session')[0], 401)
         self.assertEqual(self.request('GET', '/v1/session/' + 'x'*43)[0], 404)
         self.assertEqual(self.request('GET', '/v1/session', token='x'*43)[0], 404)
+
+    def test_v7_streams_over_http_before_upload_finishes(self):
+        server.rates.clear()
+        a = server.links.register('d' * 64)
+        b = server.links.register('e' * 64)
+        server.links.users[a]['peer'] = b
+        server.links.users[b]['peer'] = a
+        def act(token, **body):
+            status, response = self.request('POST', '/v7/transfer', body, token)
+            self.assertEqual(status, 200, response)
+            return response
+        try:
+            act(b, action='poll')
+            chunk = b'x' * 262144
+            payload = chunk * 2
+            key = act(a, action='offer', name='test.pmp', size=len(payload),
+                      sha256=hashlib.sha256(payload).hexdigest())['transfer']['id']
+            act(b, action='accept', id=key)
+            act(a, action='upload', id=key, offset=0, chunk=base64.b64encode(chunk).decode())
+            self.assertEqual(act(a, action='poll')['transfer']['state'], 'accepted')
+            self.assertEqual(base64.b64decode(act(b, action='download', id=key, offset=0)['chunk']), chunk)
+            act(b, action='download', id=key, offset=len(chunk))
+            self.assertEqual(len(server.transfers.items[key]['payload']), 0)
+            act(a, action='upload', id=key, offset=len(chunk), chunk=base64.b64encode(chunk).decode())
+            self.assertEqual(base64.b64decode(act(b, action='download', id=key, offset=len(chunk))['chunk']), chunk)
+            act(b, action='download', id=key, offset=len(payload))
+            act(b, action='complete', id=key)
+        finally:
+            server.links.users.pop(a, None)
+            server.links.users.pop(b, None)
+            server.transfers.prune(server.links.users)
+            server.rates.clear()
 
     def test_sync_private_schema(self):
         server.rates.clear()

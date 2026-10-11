@@ -11,6 +11,7 @@ public sealed partial class Plugin
 {
     [PluginService] private static IContextMenu ContextMenus { get; set; } = null!;
     private LinkClient? link;
+    private long linkReconnectAt;
     private bool linkPreview, linkPositionApplied;
     private string linkNotice = "", lastLinkState = "", lastLinkPartner = "", handledInvitation = "";
     private long linkNoticeUntil;
@@ -53,6 +54,7 @@ public sealed partial class Plugin
         StopTransfers();
         if (link is not null) PairDebug("Stopping local connection; last state=" + link.Snapshot.State);
         link?.Dispose(); link = null;
+        linkReconnectAt = 0;
         lastLinkState = lastLinkPartner = handledInvitation = "";
         CancelPair();
     }
@@ -61,6 +63,11 @@ public sealed partial class Plugin
         if (!config.PairEnabled || !ClientState.IsLoggedIn || Objects.LocalPlayer is not { } local || !LightlessLoaded())
         { if (link is not null) StopLink(); return; }
         if (link is not null && link.Identity != LinkIdentity(local)) StopLink();
+        if (link is { Completion.IsCompleted: true } && link.Snapshot.State == "error")
+        {
+            if (linkReconnectAt == 0) linkReconnectAt = Environment.TickCount64 + 10000;
+            if (Environment.TickCount64 >= linkReconnectAt) StopLink();
+        }
         link ??= new LinkClient(LinkIdentity(local), diagnosticEnabled: config.PairDebug);
         link.DiagnosticEnabled = config.PairDebug;
         while (link.TryReadDiagnostic(out var entry)) PairDebug(entry!);

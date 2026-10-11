@@ -53,7 +53,9 @@ public static partial class ModScanner
                 if (!File.Exists(full)) continue;
                 try
                 {
+                    if (new FileInfo(full).Length > 2 * 1024 * 1024) continue;
                     using var doc = JsonDocument.Parse(File.ReadAllText(full));
+                    if (doc.RootElement.ValueKind != JsonValueKind.Object) continue;
                     CollectAssetTypes(doc.RootElement, assetTypes);
                     if (Path.GetFileName(full).Equals("default_mod.json", StringComparison.OrdinalIgnoreCase) ||
                         Path.GetFileName(full).Equals("meta.json", StringComparison.OrdinalIgnoreCase))
@@ -70,6 +72,8 @@ public static partial class ModScanner
                 catch (IOException) { }
                 catch (JsonException) { }
                 catch (UnauthorizedAccessException) { }
+                catch (InvalidOperationException) { }
+                catch (FormatException) { }
             }
             if (paths.Count == 0) continue;
             var conversion = EmoteConversionInfo.Read(Path.Combine(modRoot, "synastry-conversion.json"));
@@ -214,7 +218,7 @@ public static partial class ModScanner
     internal static bool IsEmotePath(string path)
     {
         var normalized = path.Replace('\\', '/');
-        return normalized.EndsWith(".pap", StringComparison.OrdinalIgnoreCase) &&
+        return SyncRules.ValidPath(normalized.ToLowerInvariant()) && normalized.EndsWith(".pap", StringComparison.OrdinalIgnoreCase) &&
             (normalized.Contains("/emote/", StringComparison.OrdinalIgnoreCase) ||
              normalized.Contains("/emote_sp/", StringComparison.OrdinalIgnoreCase));
     }

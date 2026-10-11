@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../EmoteCategory.cs" Link="EmoteCategory.cs" />
     <Compile Include="../PairWarmup.cs" Link="PairWarmup.cs" />
     <Compile Include="../EmoteConversionInfo.cs" Link="EmoteConversionInfo.cs" />
     <Compile Include="../EmotePresentation.cs" Link="EmotePresentation.cs" />

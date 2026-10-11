@@ -44,6 +44,18 @@ internal static class ModPackageTests
         catch (InvalidDataException ex) when (ex.Message == "package_size") { }
         ModPackage.Validate(Package());
         ModPackage.Validate(Package("face.kdb"));
+        ModPackage.Validate(Package("sound/Nuobaoing.txt"));
+        using (var textPackage = new MemoryStream())
+        {
+            using (var zip = new ZipArchive(textPackage, ZipArchiveMode.Create, true))
+            {
+                using (var meta = new StreamWriter(zip.CreateEntry("meta.json").Open())) meta.Write("{\"Name\":\"Notes\"}");
+                using var notes = zip.CreateEntry("readme.txt").Open();
+                notes.Write(new byte[2 * 1024 * 1024 + 1]);
+            }
+            try { ModPackage.Validate(textPackage.ToArray()); throw new Exception("Oversized text accepted"); }
+            catch (InvalidDataException ex) when (ex.Message == "package_size") { }
+        }
         foreach (var bad in new[] { "../evil.pap", "C:/evil.pap", "x:stream.pap", "CON.pap", "x./evil.pap", "run.dll", "run.ps1", "x\\..\\evil.tex", "a//b.tex" })
         {
             try { ModPackage.Validate(Package(bad)); throw new Exception("Unsafe package accepted: " + bad); }

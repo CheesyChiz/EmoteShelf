@@ -6,7 +6,7 @@ using System.Security.Cryptography;
 
 internal static class TransferClientTests
 {
-    private sealed class Fake(bool corrupt = false, bool changeLaunch = false, bool upload = false, int loseComplete = 0, int loseAccept = 0) : HttpMessageHandler
+    private sealed class Fake(bool corrupt = false, bool changeLaunch = false, bool upload = false, int loseComplete = 0, int loseAccept = 0, bool streaming = false) : HttpMessageHandler
     {
         internal bool Accepted, Downloaded, Completed, Failed;
         internal int FailureAttempts;
@@ -18,12 +18,14 @@ internal static class TransferClientTests
         internal byte[]? Upload;
         internal readonly MemoryStream Uploaded = new();
         private bool dropped;
+        internal bool StreamAcknowledged;
+        private int streamBase;
         internal readonly byte[] Bytes = ModPackageTests.Package();
         internal const string Partner = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
         internal const string Id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancel)
         {
-            if (request.RequestUri!.AbsolutePath == "/v5/transfer" && request.Content!.Headers.ContentLength is not > 0)
+            if (request.RequestUri!.AbsolutePath == "/v7/transfer" && request.Content!.Headers.ContentLength is not > 0)
                 throw new Exception("Transfer request is missing Content-Length before serialization");
             using var doc = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancel));
             var data = doc.RootElement;
@@ -81,10 +83,20 @@ internal static class TransferClientTests
                 {
                     if (!Accepted) throw new Exception("Unsolicited download");
                     Downloaded = true;
+                    if (streaming)
+                    {
+                        var offset = data.GetProperty("offset").GetInt32();
+                        if (offset < streamBase) throw new Exception("Client lost already acknowledged streaming data");
+                        streamBase = offset;
+                        if (offset == Bytes.Length) StreamAcknowledged = true;
+                        if (offset > 0 && !dropped) { dropped = true; throw new TaskCanceledException("Lost streaming response"); }
+                        response = new { chunk = Convert.ToBase64String(Bytes, offset, Math.Min(17, Bytes.Length-offset)) };
+                    }
+                    else
                     response = new { chunk = Convert.ToBase64String(corrupt ? new byte[Bytes.Length] : Bytes) };
                 }
                 else response = new { transfer = Completed ? null : new { id = Second ? SecondId : Id, name = "Test.pmp", size = Bytes.Length,
-                    sha256 = Convert.ToHexStringLower(SHA256.HashData(Bytes)), state = Accepted ? "ready" : "offered", incoming = true, offset = 0, remaining = 600,
+                    sha256 = Convert.ToHexStringLower(SHA256.HashData(Bytes)), state = Accepted ? streaming && !StreamAcknowledged ? "accepted" : "ready" : "offered", incoming = true, offset = 0, remaining = 600, streaming,
                     launch = changeLaunch && Accepted ? new TransferLaunch("Changed", "/wave", null, []).Encode() : "" } };
             }
             return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(response), Encoding.UTF8, "application/json") };
@@ -97,6 +109,20 @@ internal static class TransferClientTests
     }
     internal static async Task Run()
     {
+        using (var relay = new Fake(streaming: true))
+        {
+            using var link = new LinkClient(new string('a', 64), relay);
+            await Until(() => link.Snapshot.State == "linked");
+            using var transfer = new TransferClient(link, Fake.Partner, relay);
+            await Until(() => transfer.Offer is not null);
+            transfer.Accept(Fake.Id);
+            ReceivedPackage? package = null;
+            await Until(() => (package ??= transfer.TakeReceived()) is not null);
+            if (!relay.StreamAcknowledged || transfer.Offer?.State != "ready" || !package!.Bytes.SequenceEqual(relay.Bytes))
+                throw new Exception("Streaming download retry or final acknowledgement failed");
+            transfer.Dispose(); await transfer.Completion;
+            link.Dispose(); await link.Completion;
+        }
         foreach (var mode in new[] { 1, 2, 3 })
         {
             using var relay = new Fake(loseAccept: mode);

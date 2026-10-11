@@ -2,6 +2,24 @@ using EmoteShelf;
 
 try
 {
+if (args.Length == 2 && args[0] == "--pmp-check")
+{
+    ModPackage.Validate(File.ReadAllBytes(Path.GetFullPath(args[1])));
+    Console.WriteLine("Local PMP validated without installation, modification or upload.");
+    return;
+}
+if (args.Length == 2 && args[0] == "--scan-check")
+{
+    var directory = Path.GetFullPath(args[1]);
+    var name = Path.GetFileName(directory);
+    var mods = ModScanner.Scan(Path.GetDirectoryName(directory)!, new Dictionary<string, string> { [name] = name }, new EmoteCatalog(), _ => []);
+    if (mods.Count == 0 || mods.SelectMany(m => m.Paths.Concat(m.BasePaths).Concat(m.Variants.SelectMany(v => v.Paths))).Any(p => !SyncRules.ValidPath(p)))
+        throw new Exception("Installed mod produced invalid game paths");
+    foreach (var mod in mods)
+        ResourceProof.Paths(directory, mod.DefaultOptions.ToDictionary(p => p.Key, p => p.Value.ToArray()), mod.Paths);
+    Console.WriteLine($"Installed mod scan verified: {mods.Count} emotes; all game paths valid; source unchanged.");
+    return;
+}
 if (args.Length == 2 && args[0] == "--carrier-check")
 {
     var paths = CarrierConversion.SourcePaths(Path.GetFullPath(args[1]));
@@ -26,6 +44,7 @@ if (args.Length == 2 && args[0] == "--package-check")
     return;
 }
 LocalizationTests.Run();
+AuditRegressionTests.Run();
 PairWarmupTests.Run();
 SoundRestartTests.Run();
 CarrierTests.Run();

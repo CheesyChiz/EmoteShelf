@@ -6,6 +6,10 @@ internal sealed class SoundRestart
     internal State Stage { get; private set; }
     private long deadline;
     private long idleSince;
+    // A stored EmoteId is not a playback-state contract. Use the native active
+    // query while retaining the actor-safety and loop checks.
+    internal static bool IsIdle(bool canPair, bool looping, bool emoting)
+        => canPair && !looping && !emoting;
     internal void StopRequested(long now) { Stage = State.AwaitIdle; deadline = now + 5000; idleSince = 0; }
     internal bool ObserveIdle(long now, bool idle)
     {

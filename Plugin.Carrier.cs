@@ -126,7 +126,7 @@ public sealed partial class Plugin
                 Log.Information("Automatic carrier ready: command={Command}", bookmark.Command);
                 var forPair = carrierRunning.Pair;
                 carrierImport = ""; carrierReady = null; carrierRunning = null;
-                Scan();
+                Scan(onlyDirectory: bookmark.ModDirectory);
                 Play(bookmark, forPair);
             }
             if (carrierBuild is null && carrierImport.Length == 0 && carrierQueued is { } queued)

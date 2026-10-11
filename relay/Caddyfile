@@ -3,7 +3,7 @@ anarchyclan.ru {
         root * /opt/emoteshelf-relay/public
         file_server
     }
-    @transfers path /v4/transfer /v5/transfer
+    @transfers path /v4/transfer /v5/transfer /v7/transfer
     handle /v6/sync {
         request_body {
             max_size 48KB

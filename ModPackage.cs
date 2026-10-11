@@ -17,7 +17,7 @@ internal static class ModPackage
         return clean + ".pmp";
     }
     private static readonly HashSet<string> Extensions = new(StringComparer.OrdinalIgnoreCase)
-    { ".json", ".mdl", ".mtrl", ".tex", ".atex", ".avfx", ".pap", ".tmb", ".scd", ".sklb", ".skp", ".eid", ".phyb", ".imc", ".eqp", ".eqdp", ".est", ".gmp", ".kdb", ".png", ".jpg", ".jpeg" };
+    { ".json", ".mdl", ".mtrl", ".tex", ".atex", ".avfx", ".pap", ".tmb", ".scd", ".sklb", ".skp", ".eid", ".phyb", ".imc", ".eqp", ".eqdp", ".est", ".gmp", ".kdb", ".png", ".jpg", ".jpeg", ".txt" };
 
     internal static string SafePath(string path)
     {
@@ -55,7 +55,7 @@ internal static class ModPackage
             using var input = File.OpenRead(path);
             var size = input.Length;
             if (size > MaxAsset || (total += size) > MaxExpanded ||
-                relative.EndsWith(".json", StringComparison.OrdinalIgnoreCase) && size > 2 * 1024 * 1024)
+                (relative.EndsWith(".json", StringComparison.OrdinalIgnoreCase) || relative.EndsWith(".txt", StringComparison.OrdinalIgnoreCase)) && size > 2 * 1024 * 1024)
                 throw new InvalidDataException("package_size");
             var bytes = new byte[(int)size]; input.ReadExactly(bytes);
             if (input.ReadByte() != -1) throw new InvalidDataException("package_source_changed");
@@ -109,6 +109,8 @@ internal static class ModPackage
             if (!files.Add(path) || !Extensions.Contains(Path.GetExtension(path))) throw new InvalidDataException("package_file_type");
             total += entry.Length;
             if (entry.Length > MaxAsset || total > MaxExpanded) throw new InvalidDataException("package_expansion");
+            if (path.EndsWith(".txt", StringComparison.OrdinalIgnoreCase) && entry.Length > 2 * 1024 * 1024)
+                throw new InvalidDataException("package_size");
             using var contents = entry.Open();
             var buffer = new byte[65536]; long read = 0; int count;
             while ((count = contents.Read(buffer)) > 0)

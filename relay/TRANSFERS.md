@@ -1,5 +1,11 @@
 # Private package transfers
 
+## Streaming protocol v7
+
+New clients use `POST /v7/transfer`. Both peers must advertise v7; there is no silent fallback to full-package storage. After recipient consent, upload and download run concurrently. Each streaming offer reserves a 2 MiB in-memory window instead of its declared package size. Uploaded bytes are incrementally hashed; consumed bytes are discarded when the recipient requests its next offset. The current chunk remains retryable until acknowledged. Full windows apply sender backpressure. An empty download chunk means wait for the sender, not EOF. The client retains downloaded bytes across transient errors and acknowledges the final offset after SHA-256 and archive validation. Installation still requires a ready transfer and the original accepted metadata. Cancellation, unlink, TTL and hash failure discard the window. No package is written to server disk. Legacy v4/v5 below retain their previous behavior for older clients.
+
+Deploy the v7 Caddy route and server changes together before enabling new clients. Existing active sessions must be allowed to finish before restarting the service.
+
 `POST /v5/transfer` uses the existing link capability in Authorization; `/v4/transfer` remains for plain legacy transfers. Both sessions must still be linked. No public package URLs, directory listing, identity lookup or bearer values in logs. Server character identity is not authenticated; use trusted partners.
 
 State machine: offer → recipient accept → sender sequential upload → hash verified → recipient download → client installation and activation confirmed → complete/delete. Reject/cancel, link expiry and TTL remove data. Sender cannot accept or download; outsiders cannot address a transfer by ID. Archive validation happens on the recipient before extracting and on sender before offering. Server treats bytes as opaque and checks SHA-256, bounds and offsets, never extracts them.

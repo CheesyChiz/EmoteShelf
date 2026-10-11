@@ -4,6 +4,11 @@ internal static class SoundRestartTests
 {
     internal static void Run()
     {
+        if (!SoundRestart.IsIdle(true, false, false) ||
+            SoundRestart.IsIdle(true, false, true) ||
+            SoundRestart.IsIdle(true, true, false) ||
+            SoundRestart.IsIdle(false, false, false))
+            throw new Exception("Idle detection must use active playback and safe actor state");
         var mod = new EmoteMod("test", "test", "test", "/hum", 0, [],
             [new("Music", "On", [], null) { HasSound = true }, new("Music", "Off", [], null)], null);
         IReadOnlyDictionary<string, IReadOnlyList<string>> on = new Dictionary<string, IReadOnlyList<string>> { ["Music"] = new[] { "On" } };
@@ -13,6 +18,11 @@ internal static class SoundRestartTests
         foreach (var pose in new[] { "/groundsit", "/cpose", "/changepose", "/sit" })
             if (SoundRestart.Needed(pose, true, mod with { BaseHasSound = true }, on)) throw new Exception("Pose sound redraw exclusion failed");
         var gate = new SoundRestart();
+        gate.Begin(); gate.StopRequested(100);
+        if (gate.ObserveIdle(200, SoundRestart.IsIdle(true, false, true)) ||
+            gate.ObserveIdle(300, SoundRestart.IsIdle(true, false, false)) ||
+            !gate.ObserveIdle(550, SoundRestart.IsIdle(true, false, false)))
+            throw new Exception("Completed one-shot must reach stable idle without requiring a cleared emote ID");
         gate.Begin(); gate.StopRequested(100);
         if (gate.ObserveIdle(200, true) || gate.ObserveIdle(400, false) || gate.ObserveIdle(450, true) ||
             gate.ObserveIdle(699, true) || !gate.ObserveIdle(700, true)) throw new Exception("Neutral state must remain stable");

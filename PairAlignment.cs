@@ -47,11 +47,12 @@ internal sealed unsafe class PairAlignment : IDisposable
 
     public void Begin(Vector3 point, float rotation, bool dance = false)
     {
-        if (objects.LocalPlayer is not { } player || !PairRules.NearbyForMode(player.Position, point, dance))
-            throw new InvalidOperationException("Move within 2 yalms on the same level first.");
+        // Dance destination may lie two yalms beyond the anchor, at a 10-yalm invitation distance.
+        if (objects.LocalPlayer is not { } player || !PairRules.WithinApproachRange(player.Position, point, dance ? 12 : 10))
+            throw new InvalidOperationException("Move within 10 yalms on the same level first.");
         destination = point;
         facing = rotation;
-        expires = Environment.TickCount64 + (dance ? 5000 : 2500);
+        expires = Environment.TickCount64 + 8000;
         lastProgress = Environment.TickCount64;
         bestDistance = Vector3.Distance(player.Position, point);
         Arrived = false;

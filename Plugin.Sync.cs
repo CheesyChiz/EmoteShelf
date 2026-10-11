@@ -153,7 +153,9 @@ public sealed partial class Plugin
                     RestartAcceptedPair();
                 }
             }
-            else if (duration == 0 || observation.Peer is null || now-observation.Received > 2000) observedPhaseDrift = double.NaN;
+            else if (duration == 0 || observation.Peer is null || now-observation.Received > 2000 ||
+                     observation.Rtt > 200 || observation.Peer.Age > 1 || Math.Abs(duration-observation.Peer.Duration) > .02)
+            { observedPhaseDrift = double.NaN; phaseMismatchSamples = 0; }
         }
         catch (Exception ex)
         {
