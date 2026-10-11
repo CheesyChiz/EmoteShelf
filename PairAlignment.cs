@@ -44,13 +44,13 @@ internal sealed unsafe class PairAlignment : IDisposable
         hook.Enable();
     }
 
-    public void Begin(Vector3 point, float rotation)
+    public void Begin(Vector3 point, float rotation, bool dance = false)
     {
-        if (objects.LocalPlayer is not { } player || !PairRules.Nearby(player.Position, point))
+        if (objects.LocalPlayer is not { } player || !PairRules.NearbyForMode(player.Position, point, dance))
             throw new InvalidOperationException("Move within 2 yalms on the same level first.");
         destination = point;
         facing = rotation;
-        expires = Environment.TickCount64 + 2500;
+        expires = Environment.TickCount64 + (dance ? 5000 : 2500);
         lastProgress = Environment.TickCount64;
         bestDistance = Vector3.Distance(player.Position, point);
         Arrived = false;

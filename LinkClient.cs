@@ -11,9 +11,11 @@ public sealed record LaunchOffer(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("family")] string Family,
     [property: JsonPropertyName("command")] string Command,
-    [property: JsonPropertyName("role")] string Role);
+    [property: JsonPropertyName("role")] string Role,
+    [property: JsonPropertyName("dance")] bool Dance = false,
+    [property: JsonPropertyName("options")] Dictionary<string, List<string>>? Options = null);
 public sealed record LaunchInvitation(LaunchOffer Offer, bool Incoming, string Status, int Remaining, string Previous = "");
-public sealed record LinkSnapshot(string State, string Partner, string Invitation, int Remaining, long ReceivedAt, string Error = "", LaunchInvitation? Launch = null);
+public sealed record LinkSnapshot(string State, string Partner, string Invitation, int Remaining, long ReceivedAt, string Error = "", LaunchInvitation? Launch = null, bool CurrentPeer = false);
 
 // Only immutable snapshots cross into the framework/UI thread.
 public sealed class LinkClient : IDisposable
@@ -69,7 +71,7 @@ public sealed class LinkClient : IDisposable
         try
         {
             Trace("register start");
-            token = (await Send("v2/connect", null, new { identity = Identity }, stop.Token)).GetProperty("token").GetString();
+            token = (await Send("v2/connect", null, new { identity = Identity, dance = true }, stop.Token)).GetProperty("token").GetString();
             if (token is null || token.Length != 43 || token.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-' && c != '_'))
                 throw new InvalidOperationException("Invalid relay response");
             Trace("register accepted");
@@ -109,7 +111,8 @@ public sealed class LinkClient : IDisposable
                     launch = new(offer, raw.GetProperty("incoming").GetBoolean(), launchState, raw.GetProperty("remaining").GetInt32(), previous);
                 }
                 Volatile.Write(ref snapshot, new(state, partner, data.GetProperty("invitation").GetString() ?? "",
-                    data.GetProperty("remaining").GetInt32(), Environment.TickCount64, error, launch));
+                    data.GetProperty("remaining").GetInt32(), Environment.TickCount64, error, launch,
+                    data.TryGetProperty("current_peer", out var currentPeer) && currentPeer.ValueKind == JsonValueKind.True));
                 var stateKey = state + "/" + (launch?.Status ?? "none");
                 if (stateKey != previousState || stage != "poll")
                     Trace($"response action={stage} state={stateKey} elapsedMs={Environment.TickCount64 - sentAt}");

@@ -6,6 +6,11 @@ internal static class LocalizationTests
 {
     internal static void Run()
     {
+        if (!EmotePresentation.IsSecondary("/content", ["/content", "/golddance"]) ||
+            !EmotePresentation.IsSecondary("/CONTENT", ["/content", "/hum"]) ||
+            EmotePresentation.IsSecondary("/content", ["/content"]) ||
+            EmotePresentation.IsSecondary("/golddance", ["/content", "/golddance"]))
+            throw new Exception("Content must be secondary only when another visible emote exists");
         // Force the raw-table parser to run before inspecting its complete dictionary.
         _ = Localization.Get("ja", "", "Settings");
         var entries = (Dictionary<string, (string Ja, string De, string Fr)>)typeof(Localization)
@@ -18,6 +23,11 @@ internal static class LocalizationTests
                     throw new Exception("Missing translation or mismatched format placeholders: " + key);
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../"));
         var configuration = File.ReadAllText(Path.Combine(root, "Configuration.cs"));
+        var mainUi = File.ReadAllText(Path.Combine(root, "Plugin.cs"));
+        var inspectionUi = File.ReadAllText(Path.Combine(root, "Plugin.Integrations.cs"));
+        if (mainUi.Contains("CollapsingHeader(T(\"Проверить применение\"") ||
+            !inspectionUi.Contains("PushID(\"modInspection\")") || !inspectionUi.Contains("OpenPopup(\"inspectionResult\")"))
+            throw new Exception("Inspection must have a unique ID scope and visible result popup");
         if (configuration.Contains("AutomaticPose") || configuration.Contains("ManualPoseMigration"))
             throw new Exception("Retired automatic-pose preferences must not override always-on playback.");
         foreach (var path in Directory.GetFiles(root, "Plugin*.cs"))

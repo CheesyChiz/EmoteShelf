@@ -24,6 +24,12 @@ public sealed partial class Plugin
     private float pairFacing;
     private float pairTargetFacing;
     private bool pairUntargetedPlayback;
+    private bool pairDance;
+    private Vector3 PairDestination(Vector3 anchor, float yaw) => pairDance ? PairRules.DancePosition(anchor, yaw) : anchor;
+    private bool PairGeometryReady(IPlayerCharacter local, IPlayerCharacter peer)
+        => string.CompareOrdinal(pairSelf, pairOther) < 0
+            ? PairRules.ReadyToLaunch(PairDestination(local.Position, local.Rotation), local.Rotation, peer.Position, peer.Rotation)
+            : PairRules.ReadyToLaunch(local.Position, local.Rotation, PairDestination(peer.Position, peer.Rotation), peer.Rotation);
     private int pairStableFrames;
     private bool pairReadySent;
     private string lastLaunchFailure = "";
@@ -132,31 +138,37 @@ public sealed partial class Plugin
             return;
         }
         var id = PairRules.Hash(Guid.NewGuid().ToString());
-        BeginPairCore(bookmark, id);
+        BeginPairCore(bookmark, id, dance: config.SharedDance);
         if (pairSession is not null && pairBookmark is not null)
         {
             var mod = discovered.First(m => m.Directory == bookmark.ModDirectory && m.Command.Equals(bookmark.Command, StringComparison.OrdinalIgnoreCase));
-            link!.Act("propose", offer: new LaunchOffer(id, PairRules.Family(mod.Name), PairRules.Hash(bookmark.Command.ToLowerInvariant()), OfferRole(bookmark)));
+            link!.Act("propose", offer: new LaunchOffer(id, PairRules.Family(mod.Name), PairRules.Hash(bookmark.Command.ToLowerInvariant()), OfferRole(bookmark), pairDance,
+                pairDance ? pairBookmark.SavedOptions : null));
         }
     }
 
-    private void BeginPairCore(Bookmark bookmark, string offerId, string? sharedFamily = null, bool restart = false)
+    private void BeginPairCore(Bookmark bookmark, string offerId, string? sharedFamily = null, bool restart = false, bool dance = false)
     {
         CancelCarrierPlayback();
         CancelPair();
+        pairDance = dance;
         pairCheckpoint = "preflight";
         lastPairStage = "";
         pairCollectionWarning = "";
         try
         {
             if (!config.PairEnabled) throw new InvalidOperationException(T("Включи экспериментальный запуск в паре в настройках.", "Enable experimental pair launch in Settings."));
+            if (link?.Snapshot.State == "linked" && !link.Snapshot.CurrentPeer)
+                throw new InvalidOperationException(T("Партнёру нужно обновить Emote Shelf до 0.3.9.1 и переподключиться.", "Your partner needs to update Emote Shelf to 0.3.9.1 and reconnect."));
             if (!LightlessLoaded()) throw new InvalidOperationException(T("Для запуска в паре нужен загруженный Lightless Sync. Обычные эмоции работают без него.", "Pair launch requires loaded Lightless Sync. Solo playback does not."));
             if (Objects.LocalPlayer is not { } local || LinkedPartner is not { } target || target.GameObjectId == local.GameObjectId)
                 throw new InvalidOperationException(T("Сначала пригласи партнёра через контекстное меню и дождись принятия. Партнёр должен быть рядом.", "Invite a partner through the context menu and wait for acceptance. Your partner must be nearby."));
             if (!LightlessHandles(target.Address)) throw new InvalidOperationException(T("Lightless не сообщает, что обрабатывает выбранного партнёра. Сначала установите синхронизацию в Lightless.", "Lightless does not report handling this partner. Set up synchronization in Lightless first."));
             if ((!CanPair(local) && !(restart && CanRestartActor(local))) || (!CanPair(target) && !(restart && CanRestartActor(target))))
                 throw new InvalidOperationException(T("Сначала оба встаньте и остановите эмоции. Запуск в паре недоступен в бою, на маунте или при касте.", "Both players must stand and stop their emotes first. Pair launch is unavailable in combat, mounted or while casting."));
-            if (!PairRules.Nearby(local.Position, target.Position))
+            if (dance && (IsPoseCommand(bookmark.Command) || bookmark.Command == "/sit"))
+                throw new InvalidOperationException(T("Для совместного танца выбери обычную эмоцию, не сидячую позу.", "Choose a regular emote for a shared dance, not a sitting pose."));
+            if (!PairRules.NearbyForMode(local.Position, target.Position, dance))
                 throw new InvalidOperationException(T("Подойдите ближе: максимум 2 ялма, на одном уровне.", "Move closer: within 2 yalms and on the same level."));
             if (!ModScanner.ValidCommand(bookmark.Command))
                 throw new InvalidOperationException(T("Эмоция недоступна.", "Emote is unavailable."));
@@ -190,7 +202,7 @@ public sealed partial class Plugin
             pairOfferQueuedAt = Environment.TickCount64;
             pairRestart = restart;
             pairFamily = sharedFamily ?? PairRules.Family(mod.Name);
-            if (restart && !PairRules.ReadyToLaunch(local.Position, local.Rotation, target.Position, target.Rotation))
+            if (restart && !PairGeometryReady(local, target))
                 throw new InvalidOperationException("Restart requires the accepted pair to remain aligned.");
             pairSession = new(pairSelf, pairOther, PairRules.Hash(pairFamily + offerId), true);
             pairMessage = T("Отправлено предложение анимации. Партнёр выбирает роль в уведомлении и подтверждает запуск.", "Animation proposed. Your partner chooses a role in the notification and accepts the launch.");
@@ -288,7 +300,7 @@ public sealed partial class Plugin
             if (!LightlessHandles(target.Address)) throw new InvalidOperationException(T("Lightless больше не обрабатывает партнёра; запуск отменён.", "Lightless no longer handles the partner; launch cancelled."));
             pairCheckpoint = "actor_state";
             if ((!CanPair(local) && !(pairRestart && CanRestartActor(local))) || (!CanPair(target) && !(pairRestart && CanRestartActor(target)) && !PairRules.PeerMayHaveStarted(snapshot.State, snapshot.StartAt, now)) ||
-                target.IsDead || !PairRules.Nearby(local.Position, target.Position))
+                target.IsDead || !PairRules.NearbyForMode(local.Position, target.Position, pairDance))
                 throw new InvalidOperationException(T("Пара отменена: движение, состояние или расстояние не подходят.", "Pair cancelled: character state or distance is unsuitable."));
             pairCheckpoint = "pose_setting";
             pairCheckpoint = "pair_transport";
@@ -321,7 +333,7 @@ public sealed partial class Plugin
                 {
                     pairCheckpoint = "alignment";
                     pairAlignment ??= new PairAlignment(Interop, Objects);
-                    pairAlignment.Begin(pairTargetOrigin, pairTargetFacing);
+                    pairAlignment.Begin(PairDestination(pairTargetOrigin, pairTargetFacing), pairTargetFacing, pairDance);
                     pairAlignStarted = true;
                     pairMessage = T("Подхожу к партнёру. Любое ручное движение отменит запуск.", "Approaching partner. Movement input cancels the launch.");
                     return;
@@ -363,7 +375,7 @@ public sealed partial class Plugin
                         if (!pairRefining)
                         {
                             pairAlignment ??= new PairAlignment(Interop, Objects);
-                            pairAlignment.BeginFinalCorrection(target.Position, target.Rotation);
+                            pairAlignment.BeginFinalCorrection(PairDestination(target.Position, target.Rotation), target.Rotation);
                             pairAlignStarted = pairRefining = true;
                             PairDebug($"attempt={pairOfferId} final correction started", true);
                             pairMessage = T("Довожу координаты и поворот после подготовки…", "Refining position and facing after preparation…");
@@ -378,7 +390,7 @@ public sealed partial class Plugin
                         PairDebug($"attempt={pairOfferId} final correction confirmed; waiting for settling", true);
                     }
                     if (now < pairRefineSettledAt) return;
-                    pairStableFrames = PairRules.ReadyToLaunch(local.Position, local.Rotation, target.Position, target.Rotation) ? pairStableFrames + 1 : 0;
+                    pairStableFrames = PairGeometryReady(local, target) ? pairStableFrames + 1 : 0;
                     if (pairStableFrames >= 3) { pairSession.Prepared(); pairReadySent = true; }
                     else pairMessage = T("Проверяю совпадение координат и поворота после подготовки…", "Confirming position and facing after preparation…");
                 }
@@ -396,7 +408,7 @@ public sealed partial class Plugin
             if (!PairResourcesReady()) throw new InvalidOperationException(T("Файлы партнёра не подтверждены. Дождитесь синхронизации Lightless и обновите Emote Shelf у обоих.", "Partner resources are not confirmed. Wait for Lightless synchronization and update Emote Shelf on both clients."));
             ValidatePairSelection();
             pairCheckpoint = "final_alignment";
-            if (!PairRules.ReadyToLaunch(local.Position, local.Rotation, target.Position, target.Rotation))
+            if (!PairGeometryReady(local, target))
                 throw new InvalidOperationException(T("Перед стартом координаты или поворот разошлись. Запуск отменён.", "Position or facing diverged before start. Launch cancelled."));
             pairCheckpoint = "dispatch";
             if (snapshot.Align) ApplyPairFacing(pairFacing);
@@ -458,6 +470,14 @@ public sealed partial class Plugin
 
     private void DrawPairSettings()
     {
+        var modes = new[] { T("Парная анимация — в одной точке", "Paired animation — same position"), T("Совместный танец — одна эмоция, 3 ялма между вами", "Shared dance — same emote, 3 yalms apart") };
+        ImGui.SetNextItemWidth(Math.Min(440, ImGui.GetContentRegionAvail().X));
+        if (ImGui.BeginCombo("##pairMode", modes[config.SharedDance ? 1 : 0]))
+        {
+            for (var i = 0; i < modes.Length; i++)
+                if (ImGui.Selectable(modes[i], config.SharedDance == (i == 1))) { config.SharedDance = i == 1; Save(); }
+            ImGui.EndCombo();
+        }
         if (ImGui.Checkbox(T("Запуск в паре — экспериментально", "Pair launch — experimental"), ref config.PairEnabled)) { StopLink(); Save(); }
         if (!config.PairEnabled) return;
         DrawLinkSettings();

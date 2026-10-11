@@ -192,15 +192,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(202 if accepted else 429, dict(accepted=accepted))
             if self.path in ('/v2/connect', '/v2/link'):
                 length = int(self.headers.get('Content-Length', '0'))
-                if not 0 < length <= 1024:
+                if not 0 < length <= 4096:
                     return self.reply(413, dict(error='Invalid body size'))
                 data = json.loads(self.rfile.read(length))
                 if not isinstance(data, dict):
                     raise ValueError('Invalid message')
                 if self.path == '/v2/connect':
-                    if set(data) != {'identity'}:
+                    if set(data) not in ({'identity'}, {'identity', 'dance'}) or type(data.get('dance', False)) is not bool:
                         raise ValueError('Invalid message')
-                    return self.reply(200, dict(token=links.register(data['identity'])))
+                    return self.reply(200, dict(token=links.register(data['identity'], data.get('dance', False))))
                 if set(data) not in ({'action', 'target', 'invitation'}, {'action', 'target', 'invitation', 'offer'}) or not all(isinstance(data[k], str) for k in ('action', 'target', 'invitation')):
                     raise ValueError('Invalid message')
                 return self.reply(200, links.action(self.token(), **data))

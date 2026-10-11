@@ -128,14 +128,29 @@ public sealed partial class Plugin
     private void DrawModInspection(EmoteMod mod)
     {
         if (inspectedDirectory != mod.Directory) { inspection = ""; inspectedDirectory = mod.Directory; }
-        if (ImGui.Button(T("Проверить применение", "Check application"))) InspectMod(mod);
+        ImGui.PushID("modInspection");
+        if (ImGui.Button(T("Проверить применение", "Check application") + "##run"))
+        {
+            InspectMod(mod);
+            ImGui.OpenPopup("inspectionResult");
+        }
         ImGui.SameLine();
         if (ImGui.Button(T("Открыть в Penumbra", "Open in Penumbra")))
         {
             try { var result = openPenumbra.Invoke(TabType.Mods, mod.Directory); if (result != PenumbraApiEc.Success) status = "Penumbra: " + result; }
             catch (Exception ex) { status = ex.Message; }
         }
-        if (inspection.Length > 0) ImGui.TextWrapped(inspection);
+        ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.Appearing);
+        if (ImGui.BeginPopup("inspectionResult"))
+        {
+            ImGui.TextUnformatted(mod.Name);
+            ImGui.Separator();
+            ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + 480);
+            ImGui.TextWrapped(inspection);
+            ImGui.PopTextWrapPos();
+            ImGui.EndPopup();
+        }
+        ImGui.PopID();
     }
 
     private void InspectMod(EmoteMod mod)

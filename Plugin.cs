@@ -408,9 +408,22 @@ public sealed partial class Plugin : IDalamudPlugin
                         throw new InvalidOperationException("sound_restart_actor_changed");
                     if (soundRestart.Stage == SoundRestart.State.ApplySettings)
                     {
+                        StopSoundEmote();
+                        soundRestart.StopRequested(Environment.TickCount64);
+                        Log.Information("Sound restart: stop requested; waiting for neutral state");
+                        return;
+                    }
+                    if (soundRestart.Stage == SoundRestart.State.AwaitIdle)
+                    {
+                        if (!soundRestart.ObserveIdle(Environment.TickCount64, SoundEmoteIsIdle()))
+                        {
+                            if (soundRestart.Stage == SoundRestart.State.Failed)
+                                throw new InvalidOperationException("sound_restart_idle_timeout");
+                            return;
+                        }
                         soundRestart.Requested(Environment.TickCount64);
                         redraw.Invoke(soundActor.ObjectIndex, RedrawType.Redraw);
-                        Log.Information("Sound restart: redraw requested");
+                        Log.Information("Sound restart: neutral state stable; refreshing selected resources");
                         return;
                     }
                     var stage = soundRestart.Advance(Environment.TickCount64);
@@ -423,12 +436,14 @@ public sealed partial class Plugin : IDalamudPlugin
                 {
                     pendingCommand = ""; pendingPoseIndex = -1;
                     soundRestart.Reset();
-                    status = T("Не удалось подтвердить перерисовку для перезапуска звука. Анимация не запущена; попробуй ещё раз.",
-                        "Redraw could not be confirmed for sound restart. The animation was not started; try again.");
+                    status = ex.Message == "sound_restart_idle_timeout"
+                        ? T("Предыдущая эмоция не завершилась. Останови её вручную и повтори запуск.", "The previous emote did not stop. Cancel it manually and retry.")
+                        : T("Не удалось подтвердить перерисовку для перезапуска звука. Анимация не запущена; попробуй ещё раз.",
+                            "Redraw could not be confirmed for sound restart. The animation was not started; try again.");
                     if (pairSession is not null) { pairCheckpoint = "prepare_validation"; CancelPair(status); }
                     ClearPendingValidation();
                     Log.Warning("Sound restart failed: {Reason}", ex is InvalidOperationException ? ex.Message : ex.GetType().Name);
-                    errorReports.Send("launch_cancelled", ex.Message == "sound_restart_redraw_timeout" ? "timeout" :
+                    errorReports.Send("launch_cancelled", ex.Message is "sound_restart_redraw_timeout" or "sound_restart_idle_timeout" ? "timeout" :
                         ex.Message == "sound_restart_actor_changed" ? "actor_state" : "prepare_mod",
                         link?.Snapshot.State ?? "none", LinkFresh, LightlessLoaded(), "", null, null,
                         new ReportContext("none", false, false, true, true, false, 0));
@@ -581,6 +596,19 @@ public sealed partial class Plugin : IDalamudPlugin
     private unsafe bool IsPlayingLoop()
         => Objects.LocalPlayer is { } player && ((Character*)player.Address)->Mode is
             CharacterModes.EmoteLoop or CharacterModes.InPositionLoop;
+
+    private unsafe void StopSoundEmote()
+    {
+        if (Objects.LocalPlayer is not { } player || !CanRestartActor(player))
+            throw new InvalidOperationException("sound_restart_actor_state");
+        // Invoke the game's state transition, never clear sound handles or write mode bytes.
+        // Restrict this to our local actor; observe completion on subsequent frames.
+        ((Character*)player.Address)->SetMode(CharacterModes.Normal, 0);
+    }
+
+    private unsafe bool SoundEmoteIsIdle()
+        => Objects.LocalPlayer is { } player && CanPair(player) &&
+           ((Character*)player.Address)->EmoteController.EmoteId == 0;
 
     private unsafe void ExecutePreparedEmote(string command, bool setSavedSlot)
     {
@@ -940,8 +968,18 @@ public sealed partial class Plugin : IDalamudPlugin
                     ImGui.EndPopup();
                 }
                 ImGui.Separator();
-                if (ImGui.CollapsingHeader(T("Проверить применение", "Check application"))) DrawModInspection(selected[0]);
-                foreach (var mod in selected.Where(MatchesLibraryFilter)) DrawEmoteCard(mod);
+                DrawModInspection(selected[0]);
+                var visibleCards = selected.Where(MatchesLibraryFilter).ToArray();
+                var commands = visibleCards.Select(m => m.Command).ToArray();
+                foreach (var mod in visibleCards.Where(m => !EmotePresentation.IsSecondary(m.Command, commands))) DrawEmoteCard(mod);
+                var secondaryCards = visibleCards.Where(m => EmotePresentation.IsSecondary(m.Command, commands)).ToArray();
+                if (secondaryCards.Length > 0)
+                {
+                    ImGui.PushID(selectedModDirectory);
+                    if (ImGui.CollapsingHeader(T("Дополнительные эмоции", "Additional emotes") + "##secondaryEmotes"))
+                        foreach (var mod in secondaryCards) DrawEmoteCard(mod);
+                    ImGui.PopID();
+                }
             }
         }
         ImGui.EndChild();
@@ -1032,24 +1070,8 @@ public sealed partial class Plugin : IDalamudPlugin
         var locked = catalog?.IsUnlocked(mod.Command, Unlocks) == false;
         if (locked) ImGui.TextColored(new Vector4(1f, .65f, .25f, 1f), T("Не разблокирована", "Not unlocked"));
         if (locked && ImGui.IsItemHovered()) ImGui.SetTooltip(T("При обычном запуске плагин автоматически подберёт доступную эмоцию. Оригинал мода не изменится.", "Normal playback automatically selects an unlocked emote. The original mod stays unchanged."));
-        if (mod.Variants.Length == 0)
-        {
-            if (ImGui.SmallButton(T("Предпросмотр", "Preview"))) Preview(mod, null);
-            ImGui.SameLine();
-            if (ImGui.SmallButton(T("На панель", "Add to panel"))) AddBookmark(mod, null);
-            if (config.PairEnabled) { ImGui.SameLine(); if (ImGui.SmallButton(T("В паре", "Pair"))) BeginPair(mod); }
-        }
         ImGui.EndGroup();
         if (IsPoseCommand(mod.Command)) DrawPoseSelector(mod);
-        if (ImGui.SmallButton(T("Передать мод и предложить запуск", "Send mod with playback offer")))
-        {
-            if (mod.Variants.Length > 0 && draftOptions.ContainsKey(mod.Directory)) PlayDraft(mod, false, transfer: true);
-            else
-            {
-                try { PrepareTransferLaunch(CreateBookmark(mod, null)); }
-                catch (Exception ex) { status = ex.Message; }
-            }
-        }
         if (mod.Variants.Length > 0)
         {
             ImGui.Checkbox(T("Показать все варианты", "Show all variants"), ref showAllVariants);
@@ -1092,16 +1114,51 @@ public sealed partial class Plugin : IDalamudPlugin
                     }
                     ImGui.PopID();
                 }
-                ImGui.Spacing();
-                if (ImGui.Button(T("Предпросмотр", "Preview"))) PlayDraft(mod, false);
-                ImGui.SameLine();
-                if (ImGui.Button(T("На панель", "Add to panel"))) PlayDraft(mod, true);
-                if (config.PairEnabled) { ImGui.SameLine(); if (ImGui.Button(T("В паре", "Pair"))) PlayDraft(mod, false, true); }
             }
         }
+        ImGui.Spacing();
+        DrawEmoteActions(mod);
         ImGui.EndGroup();
         ImGui.Separator();
         ImGui.PopID();
+    }
+
+    private void DrawEmoteActions(EmoteMod mod)
+    {
+        var labels = new[] { T("Предпросмотр", "Preview"), T("На панель", "Add to panel"), T("В паре", "Pair") };
+        var available = ImGui.GetContentRegionAvail().X;
+        var gap = ImGui.GetStyle().ItemSpacing.X;
+        var width = Math.Min(available, Math.Max(ImGui.GetFontSize() * 6,
+            labels.Max(label => ImGui.CalcTextSize(label).X) + ImGui.GetStyle().FramePadding.X * 2));
+        var size = new Vector2(width, ImGui.GetFrameHeight());
+        var draft = mod.Variants.Length > 0;
+        ImGui.BeginDisabled(draft && !draftOptions.ContainsKey(mod.Directory));
+        var used = 0f;
+        for (var i = 0; i < (config.PairEnabled ? 3 : 2); i++)
+        {
+            if (i > 0 && used + gap + width <= available) { ImGui.SameLine(); used += gap; }
+            else used = 0;
+            if (ImGui.Button(labels[i], size))
+            {
+                if (draft) PlayDraft(mod, i == 1, pair: i == 2);
+                else if (i == 0) Preview(mod, null);
+                else if (i == 1) AddBookmark(mod, null);
+                else BeginPair(mod);
+            }
+            used += width;
+        }
+        if (ImGui.Button(T("Передать мод…", "Send mod…"), new Vector2(Math.Min(available,
+            Math.Max(width, ImGui.CalcTextSize(T("Передать мод…", "Send mod…")).X + ImGui.GetStyle().FramePadding.X * 2)), size.Y)))
+        {
+            if (draft) PlayDraft(mod, false, transfer: true);
+            else
+            {
+                try { PrepareTransferLaunch(CreateBookmark(mod, null)); }
+                catch (Exception ex) { status = ex.Message; }
+            }
+        }
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip(T("Передать мод и предложить запуск", "Send mod with playback offer"));
+        ImGui.EndDisabled();
     }
 
     private void PlayDraft(EmoteMod mod, bool add, bool pair = false, bool transfer = false)
@@ -1397,18 +1454,19 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void DrawPanelTab()
     {
-        DrawPairLibrary();
         if (ImGui.Checkbox(T("Показывать игровую панель", "Show in-game panel"), ref config.OverlayVisible)) Save();
         ImGui.SameLine();
         if (ImGui.Checkbox(T("Закрепить положение", "Lock position"), ref config.OverlayLocked)) Save();
+        ImGui.PushItemWidth(Math.Min(220, ImGui.GetContentRegionAvail().X * .45f));
         if (ImGui.SliderInt(T("Значков в строке", "Icons per row"), ref config.Columns, 1, 12)) Save();
         if (ImGui.Checkbox(T("Новые строки вверх", "Grow new rows upward"), ref config.PanelGrowUp)) Save();
         if (ImGui.Checkbox(T("Новые столбцы влево", "Grow new columns leftward"), ref config.PanelGrowLeft)) Save();
-        ImGui.TextWrapped(T("Выбранный угол панели остаётся на месте при добавлении кнопок. Над чатом включи рост вверх; у правого края — влево. Для одной колонки задай 1 значок в строке.",
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip(T("Выбранный угол панели остаётся на месте при добавлении кнопок. Над чатом включи рост вверх; у правого края — влево. Для одной колонки задай 1 значок в строке.",
             "The selected corner stays anchored when buttons are added. Above chat, grow upward; at the right edge, grow leftward. For a single column, set icons per row to 1."));
-        if (ImGui.SliderFloat(T("Размер значка", "Icon size"), ref config.IconSize, 16, 80)) Save();
-        if (ImGui.SliderFloat(T("Прозрачность панели", "Panel opacity"), ref config.PanelOpacity, 0.1f, 1f)) Save();
-        ImGui.TextWrapped(T("Панель — отдельное окно с иконками. Открепи её, чтобы перетащить за свободное место. Скрыть можно здесь или командой /eshelf hide.",
+        if (ImGui.SliderFloat(T("Размер значка", "Icon size"), ref config.IconSize, 16, 80, "%.0f px")) Save();
+        if (ImGui.SliderFloat(T("Прозрачность панели", "Panel opacity"), ref config.PanelOpacity, 0.1f, 1f, "%.2f")) Save();
+        ImGui.PopItemWidth();
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip(T("Панель — отдельное окно с иконками. Открепи её, чтобы перетащить за свободное место. Скрыть можно здесь или командой /eshelf hide.",
             "The icon panel is a separate window. Unlock it and drag its empty area to move it. Hide it here or with /eshelf hide."));
         ImGui.Separator();
         if (config.Bookmarks.Count == 0) ImGui.TextDisabled(T("Пока пусто: добавь эмоцию во вкладке «Эмоции».", "Empty: add an emote on the Emotes tab."));
@@ -1425,14 +1483,16 @@ public sealed partial class Plugin : IDalamudPlugin
             ReorderBookmarkDragDrop(i);
             ImGui.SameLine();
             var name = b.Name;
-            ImGui.SetNextItemWidth(320);
+            ImGui.SetNextItemWidth(Math.Max(120, ImGui.GetContentRegionAvail().X - 170));
             if (ImGui.InputText($"##name{i}", ref name, 100)) { b.Name = name; Save(); }
             ImGui.SameLine();
             ImGui.TextDisabled(b.Command);
+            ImGui.SameLine();
             DrawBookmarkTools(b, i);
         }
         ImGui.TextDisabled(T("Каждый значок хранит свой вариант настроек мода. Он не меняется при переключении других эмоций.",
             "Each icon keeps its own mod options. Switching other emotes does not replace them."));
+        DrawPairLibrary();
     }
 
     private void ReorderBookmarkDragDrop(int target)

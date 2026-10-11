@@ -21,7 +21,7 @@ anarchyclan.ru {
     @pair path /health /v1/ready /v1/session /v1/prepared /v1/finished /v2/connect /v2/link /v3/report
     handle @pair {
         request_body {
-            max_size 2KB
+            max_size 4KB
         }
         reverse_proxy 127.0.0.1:8765 {
             header_up X-Forwarded-For {remote_host}

@@ -7,6 +7,16 @@ SoundRestartTests.Run();
 CarrierTests.Run();
 OffsetTests.Run();
 SyncTests.Run();
+foreach (var yaw in new[] { 0f, MathF.PI / 2, -MathF.PI, MathF.Tau })
+{
+    var anchor = new System.Numerics.Vector3(20, 7, -12);
+    var follower = PairRules.DancePosition(anchor, yaw);
+    if (Math.Abs(System.Numerics.Vector3.Distance(anchor, follower) - 3) > .0001 ||
+        follower.Y != anchor.Y || !PairRules.NearbyForMode(anchor, follower, true) ||
+        PairRules.NearbyForMode(anchor, follower, false)) throw new Exception("Dance geometry failed");
+}
+if (PairRules.NearbyForMode(default, new(float.NaN, 0, 0), true) ||
+    PairRules.NearbyForMode(default, new(3, 1, 0), true)) throw new Exception("Unsafe dance position accepted");
 
 static void Check(string name, int? actual, int? expected)
 {

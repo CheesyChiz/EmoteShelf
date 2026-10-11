@@ -6,6 +6,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../EmotePresentation.cs" Link="EmotePresentation.cs" />
     <Compile Include="../SyncClient.cs" Link="SyncClient.cs" />
     <Compile Include="../SyncRules.cs" Link="SyncRules.cs" />
     <Compile Include="../ResourceProof.cs" Link="ResourceProof.cs" />

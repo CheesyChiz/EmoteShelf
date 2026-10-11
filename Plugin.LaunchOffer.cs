@@ -56,6 +56,7 @@ public sealed partial class Plugin
 
     private void DrawLaunchInvitation(LaunchInvitation request)
     {
+        if (request.Offer.Dance) { DrawDanceInvitation(request); return; }
         if (offerEditorId != request.Offer.Id)
         {
             offerEditorId = request.Offer.Id;
@@ -166,6 +167,44 @@ public sealed partial class Plugin
         }
         else if (ImGui.Button(T("Обновить список модов", "Refresh mods"))) { Scan(); offerEditorId = ""; }
         if (ImGui.Button(T("Отказаться", "Decline"))) link?.Act("reject_launch", invitation: request.Offer.Id);
+        if (offerEditorError.Length > 0) ImGui.TextWrapped(Localization.Runtime(config.Language, offerEditorError));
+    }
+
+    private void DrawDanceInvitation(LaunchInvitation request)
+    {
+        ImGui.TextWrapped(T("Совместный танец: одинаковая эмоция, 3 ялма между вами, взгляд в одну сторону.",
+            "Shared dance: the same emote, 3 yalms apart, facing the same direction."));
+        var mod = discovered.FirstOrDefault(m => !IsCarrierCopy(m.Directory) && PairRules.Family(m.Name) == request.Offer.Family &&
+            PairRules.Hash(m.Command.ToLowerInvariant()) == request.Offer.Command);
+        ImGui.TextWrapped(mod?.Name ?? T("Этот мод не найден в твоём списке.", "This mod is not in your local list."));
+        if (mod is not null) ImGui.TextUnformatted(mod.EmoteName);
+        if (request.Incoming)
+        {
+            ImGui.BeginDisabled(mod is null || pairSession is not null || LinkedPartner is null);
+            if (ImGui.Button(T("Принять и запустить", "Accept and start")))
+            {
+                try
+                {
+                    if (!LinkFresh || link?.Snapshot.Launch?.Offer.Id != request.Offer.Id) throw new InvalidOperationException("Proposal expired");
+                    var draft = CreateBookmark(mod!, null);
+                    draft.SavedOptions = request.Offer.Options?.ToDictionary(x => x.Key, x => x.Value.ToList()) ?? [];
+                    // Only local catalog commands are executable. Remote choices must match this installed mod.
+                    ValidateBookmark(draft, mod!);
+                    if (mod!.Variants.Any(v => draft.SavedOptions.TryGetValue(v.Group, out var choices) && choices.Contains(v.Option) && !VariantCompatible(v, mod)))
+                        throw new InvalidOperationException(T("Выбери вариант для своей модели тела.", "Choose options compatible with your character model."));
+                    if (IsPoseCommand(draft.Command) || OfferRole(draft) != request.Offer.Role)
+                        throw new InvalidOperationException(T("Настройки танца не совпали с установленным модом. Обновите мод у обоих.",
+                            "Dance settings do not match the installed mod. Update the mod on both clients."));
+                    BeginPairCore(draft, request.Offer.Id, dance: true);
+                    if (pairSession is not null) link!.Act("accept_launch", invitation: request.Offer.Id);
+                    else offerEditorError = pairMessage;
+                }
+                catch (Exception ex) { offerEditorError = ex.Message; }
+            }
+            ImGui.EndDisabled(); ImGui.SameLine();
+            if (ImGui.Button(T("Отказаться", "Decline"))) link?.Act("reject_launch", invitation: request.Offer.Id);
+        }
+        else if (ImGui.Button(T("Отменить предложение", "Cancel proposal"))) CancelPair();
         if (offerEditorError.Length > 0) ImGui.TextWrapped(Localization.Runtime(config.Language, offerEditorError));
     }
 }

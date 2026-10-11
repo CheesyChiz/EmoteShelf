@@ -38,7 +38,9 @@ public sealed partial class Plugin
     private void DrawBookmarkTools(Bookmark b, int index)
     {
         ImGui.PushID("bookmarkTools" + index);
-        if (ImGui.TreeNode(T("Роль и команда", "Role and command")))
+        if (ImGui.SmallButton("...##edit")) ImGui.OpenPopup("bookmarkEditor");
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip(T("Роль и команда", "Role and command"));
+        if (ImGui.BeginPopup("bookmarkEditor"))
         {
             b.RoleLabel ??= ""; b.Alias ??= "";
             DrawOffsetBookmark(b);
@@ -49,7 +51,7 @@ public sealed partial class Plugin
                 string.Equals(x.Alias, b.Alias, StringComparison.OrdinalIgnoreCase)) == 1;
             if (valid) ImGui.TextDisabled("/es play " + b.Alias + "   /es pair " + b.Alias);
             else ImGui.TextWrapped(T("Команда: латинские буквы, цифры, - и _. Название должно быть уникальным.", "Alias: letters A-Z, digits, - and _. Each alias must be unique."));
-            ImGui.TreePop();
+            ImGui.EndPopup();
         }
         ImGui.PopID();
     }

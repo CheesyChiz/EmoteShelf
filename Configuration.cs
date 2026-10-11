@@ -7,6 +7,7 @@ public sealed class Configuration : IPluginConfiguration
 {
     public int Version { get; set; } = 1;
     public bool OverlayVisible = true;
+    public bool SharedDance;
     public List<Bookmark> Bookmarks = [];
     public List<PairPreset> PairPresets = [];
     public Dictionary<string, string> CommandOverrides = new(StringComparer.OrdinalIgnoreCase);

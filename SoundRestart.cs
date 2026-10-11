@@ -2,9 +2,19 @@ namespace EmoteShelf;
 
 internal sealed class SoundRestart
 {
-    internal enum State { Inactive, ApplySettings, AwaitRedraw, Settle, Ready, Failed }
+    internal enum State { Inactive, ApplySettings, AwaitIdle, AwaitRedraw, Settle, Ready, Failed }
     internal State Stage { get; private set; }
     private long deadline;
+    private long idleSince;
+    internal void StopRequested(long now) { Stage = State.AwaitIdle; deadline = now + 5000; idleSince = 0; }
+    internal bool ObserveIdle(long now, bool idle)
+    {
+        if (Stage != State.AwaitIdle) return false;
+        if (now >= deadline) { Stage = State.Failed; return false; }
+        if (!idle) { idleSince = 0; return false; }
+        if (idleSince == 0) idleSince = now;
+        return now - idleSince >= 250;
+    }
     internal static bool Needed(string command, bool playing, EmoteMod mod,
         IReadOnlyDictionary<string, IReadOnlyList<string>> options)
         => playing && command.ToLowerInvariant() is not ("/groundsit" or "/cpose" or "/changepose" or "/sit") &&

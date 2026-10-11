@@ -3,6 +3,34 @@ from links import LinkStore
 
 
 class LinkTests(unittest.TestCase):
+    def test_dance_requires_both_clients_and_preserves_choices_on_restart(self):
+        invitation = self.invite()['invitation']
+        self.store.action(self.b, 'accept', invitation=invitation)
+        offer = dict(id='1'*64, family='2'*64, command='3'*64, role='4'*64,
+                     dance=True, options={'Music': ['On']})
+        with self.assertRaises(ValueError): self.store.action(self.a, 'propose', offer=offer)
+        self.store.users[self.a]['dance'] = True
+        self.store.users[self.b]['dance'] = True
+        self.store.action(self.a, 'propose', offer=offer)
+        incoming = self.store.action(self.b)['launch']
+        self.assertTrue(incoming['dance'])
+        self.assertEqual(incoming['options'], offer['options'])
+        self.store.action(self.b, 'accept_launch', invitation=offer['id'])
+        self.store.action(self.a, 'finish_launch', invitation=offer['id'])
+        self.store.action(self.b, 'finish_launch', invitation=offer['id'])
+        restart = self.store.action(self.a, 'restart')['launch']
+        self.assertTrue(restart['dance'])
+        self.assertEqual(restart['options'], offer['options'])
+
+    def test_dance_rejects_unbounded_choices(self):
+        invitation = self.invite()['invitation']
+        self.store.action(self.b, 'accept', invitation=invitation)
+        self.store.users[self.a]['dance'] = self.store.users[self.b]['dance'] = True
+        for choices in ({'Music': 'On'}, {'Music': ['x'*129]}, {'Music': ['x'*100]*32}):
+            with self.assertRaises(ValueError):
+                self.store.action(self.a, 'propose', offer=dict(id='1'*64, family='2'*64,
+                    command='3'*64, role='4'*64, dance=True, options=choices))
+
     def test_restart_only_after_both_finished_and_same_link(self):
         invitation = self.invite()['invitation']
         self.store.action(self.b, 'accept', invitation=invitation)

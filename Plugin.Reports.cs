@@ -6,7 +6,7 @@ namespace EmoteShelf;
 public sealed partial class Plugin
 {
     private readonly ErrorReports errorReports = new();
-    private const int DiagnosticsPolicyVersion = 2;
+    private const int DiagnosticsPolicyVersion = 3;
     private bool diagnosticsNoticeOpen = true;
     private bool DiagnosticsAcknowledged => config.DiagnosticsNoticeVersion == DiagnosticsPolicyVersion;
     private void DrawDiagnosticsNotice()
@@ -31,6 +31,7 @@ public sealed partial class Plugin
     }
     private void DrawReportDisclosure()
     {
+        ImGui.TextWrapped(T("При приглашении на совместный танец партнёру через сервер передаются названия выбранных вариантов мода. Они хранятся временно для приглашения и повторного запуска, не в отчётах.", "Shared dance invitations send selected mod option names to your partner through the relay. They are kept temporarily for invitations and restarts, not in reports."));
         ImGui.TextWrapped(T("Для проверки пары через сервер партнёру также передаются названия игровых ресурсов, контрольные суммы SHA-256 и время анимации. Локальные пути на диске и содержимое файлов в эту проверку не входят. Эти данные временно хранятся в памяти, не в диагностических отчётах.", "Pair verification also exchanges game resource names, SHA-256 checksums and animation timing through the relay with your partner. Local disk paths and file contents are not part of this verification. These samples expire in memory and are not diagnostic reports."));
         ImGui.TextWrapped(T("Передаются: версия плагина, случайные ID отчёта/попытки, технический код и этап сбоя, состояние связи и Lightless, флаги подготовки, расстояние и угол между участниками. Полные логи, имена, чат, токены, пути и абсолютные координаты не отправляются. Сервер видит IP соединения, но не записывает его в отчёт. Доступ к отчётам имеет администратор Emote Shelf по SSH. Хранение до 14 дней с очисткой раз в час; база ограничена 10 000 отчётов / 32 МиБ. При недоступности сети — ограниченные повторы в памяти; выход из игры удаляет очередь.",
             "Reports contain plugin version, random report/attempt IDs, technical failure code and checkpoint, relay/Lightless state, preparation flags, relative distance and angle. No full logs, names, chat, tokens, paths or absolute coordinates. The server sees your connection IP but does not store it in reports. The Emote Shelf administrator accesses reports via SSH. Retention is 14 days with hourly cleanup; storage is capped at 10,000 reports / 32 MiB. Network failures use bounded in-memory retries; exiting the game discards the queue."));

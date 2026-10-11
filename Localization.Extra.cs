@@ -12,6 +12,16 @@ internal static partial class Localization
         }
     }
     private const string Additional = """
+Your partner needs to update Emote Shelf to 0.3.9.1 and reconnect.|相手はEmote Shelfを0.3.9.1に更新して再接続する必要があります。|Dein Partner muss Emote Shelf auf 0.3.9.1 aktualisieren und sich erneut verbinden.|Votre partenaire doit mettre Emote Shelf à jour vers 0.3.9.1 et se reconnecter.
+Paired animation — same position|ペアアニメーション — 同じ位置|Paaranimation — gleiche Position|Animation à deux — même position
+Shared dance invitations send selected mod option names to your partner through the relay. They are kept temporarily for invitations and restarts, not in reports.|一緒に踊る招待では選択したMODオプション名をサーバー経由で相手に送信します。招待と再開始のため一時保存され、レポートには含まれません。|Tanzeinladungen senden die Namen gewählter Mod-Optionen über den Server an deinen Partner. Sie werden vorübergehend für Einladungen und Neustarts gespeichert, nicht in Berichten.|Les invitations de danse transmettent les noms des options du mod à votre partenaire via le serveur. Ils sont conservés temporairement pour les invitations et les relances, pas dans les rapports.
+Additional emotes|追加のエモート|Weitere Emotes|Emotes supplémentaires
+Send mod…|MODを送信…|Mod senden…|Envoyer le mod…
+The previous emote did not stop. Cancel it manually and retry.|前のエモートが終了しませんでした。手動で停止して再試行してください。|Das vorherige Emote wurde nicht beendet. Brich es manuell ab und versuche es erneut.|L’emote précédente ne s’est pas arrêtée. Annulez-la manuellement puis réessayez.
+Choose a regular emote for a shared dance, not a sitting pose.|一緒に踊るには座りポーズではなく通常のエモートを選んでください。|Wähle für den gemeinsamen Tanz ein normales Emote, keine Sitzpose.|Choisissez une emote normale pour danser ensemble, pas une pose assise.
+Shared dance — same emote, 3 yalms apart|一緒に踊る — 同じエモート、間隔3ヤルム|Gemeinsam tanzen — gleiches Emote, 3 Yalme Abstand|Danse ensemble — même emote, à 3 yalms
+Shared dance: the same emote, 3 yalms apart, facing the same direction.|一緒に踊る：同じエモート、間隔3ヤルム、同じ方向を向きます。|Gemeinsamer Tanz: gleiches Emote, 3 Yalme Abstand, gleiche Blickrichtung.|Danse ensemble : même emote, à 3 yalms, dans la même direction.
+Dance settings do not match the installed mod. Update the mod on both clients.|ダンス設定がインストール済みMODと一致しません。双方でMODを更新してください。|Die Tanzeinstellungen passen nicht zur installierten Mod. Aktualisiert die Mod auf beiden Clients.|Les réglages de danse ne correspondent pas au mod installé. Mettez-le à jour sur les deux clients.
 The selected mod will be packaged automatically. No manual export is needed.|選択したMODを自動でパッケージ化します。手動エクスポートは不要です。|Die ausgewählte Mod wird automatisch gepackt. Kein manueller Export nötig.|Le mod sélectionné sera empaqueté automatiquement. Aucun export manuel nécessaire.
 Your role: |自分の役割：|Deine Rolle: |Votre rôle :
 Partner role|相手の役割|Partnerrolle|Rôle du partenaire
