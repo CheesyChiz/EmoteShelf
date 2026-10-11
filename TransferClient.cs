@@ -22,6 +22,7 @@ internal sealed class TransferClient : IDisposable
     private readonly Action<string>? diagnostic;
     private string stage = "poll", failedId = "";
     private int failures;
+    private object? pendingFailure;
     // This is an application/json HTTP body, never HTML. Preserve Base64 '+' bytes
     // instead of expanding them to six-byte Unicode escapes beyond the relay limit.
     internal static JsonContent RequestContent(object message) => JsonContent.Create(message,
@@ -136,11 +137,20 @@ internal sealed class TransferClient : IDisposable
                 try
                 {
                     var queued = commands.TryDequeue(out var command);
+                    if (pendingFailure is not null)
+                    {
+                        if (queued) commands.Enqueue(command);
+                        command = (pendingFailure, null);
+                        queued = true;
+                    }
+                    if (queued && JsonSerializer.SerializeToElement(command.Message).GetProperty("action").GetString() == "fail")
+                        pendingFailure = command.Message;
                     if (queued && command.Payload is not null) outgoing = command.Payload;
                     var result = await Send(queued ? command.Message : new { action = "poll" });
+                    pendingFailure = null;
                     var raw = result.GetProperty("transfer");
                     if (result.TryGetProperty("outcome", out var ended) && ended.GetString() is { Length: > 0 } reason)
-                        Volatile.Write(ref outcome, reason is "completed" or "declined" or "cancelled" or "expired" or "integrity_failed" ? reason : "");
+                        Volatile.Write(ref outcome, reason is "completed" or "declined" or "cancelled" or "expired" or "integrity_failed" or "installation_failed" ? reason : "");
                     var next = raw.ValueKind == JsonValueKind.Null ? null : raw.Deserialize<PackageOffer>(new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
                     if (next is not null && (next.Size is <= 0 or > ModPackage.MaxCompressed || next.Offset < 0 || next.Offset > next.Size ||
                         next.Id.Length != 32 || !next.Id.All(char.IsAsciiHexDigit) || next.Sha256.Length != 64 || !next.Sha256.All(char.IsAsciiHexDigit) ||
@@ -213,13 +223,14 @@ internal sealed class TransferClient : IDisposable
                     Volatile.Write(ref error, code);
                     // Poll again before retrying uploads: a timed-out response may have
                     // committed its chunk already. The relay offset is authoritative.
-                    if ((stage is "upload" or "download" or "poll") &&
+                    if ((stage is "upload" or "download" or "poll" or "fail") &&
                         (code is "transfer_timeout" or "transfer_network" or "transfer_http_429" or "transfer_http_502" or "transfer_http_503" or "transfer_http_504") && ++failures <= 3)
                     {
                         await Task.Delay(1000, stop.Token);
                         continue;
                     }
                     // Keep errors visible; never repeatedly retry a rejected archive automatically.
+                    pendingFailure = null;
                     failedId = offer?.Id ?? "";
                     if (offer is { Incoming: true } bad && acceptedId == bad.Id) downloadedId = bad.Id;
                     outgoing = null;

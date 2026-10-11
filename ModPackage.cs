@@ -151,9 +151,11 @@ internal static class ModPackage
         }
     }
 
-    internal static string ExtractNew(byte[] bytes, string root)
+    internal static string ExtractNew(byte[] bytes, string root, CancellationToken cancellation = default)
     {
+        cancellation.ThrowIfCancellationRequested();
         Validate(bytes);
+        cancellation.ThrowIfCancellationRequested();
         var directory = "EmoteShelfReceived_" + Guid.NewGuid().ToString("N");
         var target = Path.Combine(Path.GetFullPath(root), directory);
         if (Directory.Exists(target)) throw new IOException("package_destination");
@@ -161,12 +163,20 @@ internal static class ModPackage
         using var zip = new ZipArchive(new MemoryStream(bytes, false), ZipArchiveMode.Read);
         foreach (var entry in zip.Entries)
         {
+            cancellation.ThrowIfCancellationRequested();
             var path = Path.Combine(target, SafePath(entry.FullName).Replace('/', Path.DirectorySeparatorChar));
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             using var destination = new FileStream(path, FileMode.CreateNew, FileAccess.Write);
             using var source = entry.Open();
-            source.CopyTo(destination);
+            var buffer = new byte[65536];
+            int count;
+            while ((count = source.Read(buffer)) > 0)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                destination.Write(buffer, 0, count);
+            }
         }
+        cancellation.ThrowIfCancellationRequested();
         // Keep the sender's display name exactly as packaged. Only the generated
         // directory and removed stable IDs provide import isolation, not a name prefix.
         var metaPath = Path.Combine(target, "meta.json");

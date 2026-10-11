@@ -22,6 +22,7 @@ public sealed partial class Plugin
     private string lastTransferOutcome = "";
     private Task? transferSending;
     private Task<string>? transferExtracting;
+    private CancellationTokenSource? transferExtractionCancellation;
     private string importingDirectory = "", importingOffer = "";
     private long importDeadline;
     private string importStage = "";
@@ -33,10 +34,10 @@ public sealed partial class Plugin
     private readonly AddMod addReceivedMod = new(Pi);
     private readonly GetSettingsInAllCollections receivedSettings = new(Pi);
     private readonly TrySetMod setReceivedModEnabled = new(Pi);
-    private readonly DeleteMod removeReceivedMod = new(Pi);
 
     private void StopTransfers()
     {
+        transferExtractionCancellation?.Cancel();
         transfers?.Dispose(); transfers = null; transferPartner = "";
     }
 
@@ -62,6 +63,7 @@ public sealed partial class Plugin
             transferMessage = lastTransferOutcome switch
             {
                 "completed" => T("Получатель подтвердил установку и включение мода.", "The recipient confirmed installation and activation."),
+                "installation_failed" when !transferImportFailed => T("Получатель скачал мод, но установка, включение или подготовка запуска завершились ошибкой. Подробности находятся у получателя; передача завершена без подтверждения успеха.", "The recipient downloaded the mod, but installation, activation or playback preparation failed. Details are available on the recipient's client; the transfer ended without confirmation of success."),
                 "declined" => T("Получатель отклонил передачу.", "The recipient declined the transfer."),
                 "cancelled" => T("Отправитель отменил передачу.", "The sender cancelled the transfer."),
                 "expired" => T("Срок передачи истёк. Пакет удалён с сервера.", "The transfer expired. The package was removed from the server."),
@@ -80,21 +82,26 @@ public sealed partial class Plugin
             try
             {
                 if (transferExtracting is not null || importingDirectory.Length > 0) throw new InvalidOperationException("transfer_busy");
+                importingOffer = package.Id;
                 var root = getRoot.Invoke();
                 if (string.IsNullOrWhiteSpace(root)) throw new InvalidOperationException("penumbra_unavailable");
-                importingOffer = package.Id;
                 transferImportFailed = false;
                 importStage = "extract";
-                transferExtracting = Task.Run(() => ModPackage.ExtractNew(package.Bytes, root));
+                transferExtractionCancellation = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                var cancellation = transferExtractionCancellation.Token;
+                transferExtracting = Task.Run(() => ModPackage.ExtractNew(package.Bytes, root, cancellation), cancellation);
             }
             catch (Exception ex) { ImportFailure(ex); }
         }
         if (transferExtracting is { IsCompleted: true } extraction)
         {
             transferExtracting = null;
+            transferExtractionCancellation?.Dispose();
+            transferExtractionCancellation = null;
             try
             {
                 importingDirectory = extraction.GetAwaiter().GetResult();
+                RequireImportAuthorization();
                 importStage = "register";
                 // Unique folder and fresh metadata identity: never merge into a user's existing mod.
                 var result = addReceivedMod.Invoke(importingDirectory);
@@ -102,7 +109,7 @@ public sealed partial class Plugin
                 importDeadline = Environment.TickCount64 + 5000;
                 return; // Let Penumbra finish its mod-added event processing before querying settings.
             }
-            catch (Exception ex) { ImportFailure(ex); importingDirectory = ""; }
+            catch (Exception ex) { ImportFailure(ex); DeactivateFailedImport(); importingDirectory = ""; }
         }
         if (importingDirectory.Length > 0)
         {
@@ -128,14 +135,7 @@ public sealed partial class Plugin
                 // Acceptance authorizes activation only for the same character/collection
                 // that the recipient saw, never a collection chosen after switching actors.
                 importStage = "authorize";
-                if (transfers is null || transfers != transferAcceptedClient || !LinkFresh ||
-                    transfers.Offer is not { Incoming: true, State: "ready" } activeOffer || activeOffer.Id != importingOffer ||
-                    transferAcceptOffer != importingOffer || transferAcceptCollection == Guid.Empty ||
-                    Objects.LocalPlayer is not { } local || LinkIdentity(local) != transferAcceptIdentity)
-                    throw new InvalidOperationException("penumbra_collection_changed");
-                var (validCollection, _, currentCollection) = getCollection.Invoke(local.ObjectIndex);
-                if (!validCollection || currentCollection.Id != transferAcceptCollection)
-                    throw new InvalidOperationException("penumbra_collection_changed");
+                RequireImportAuthorization();
                 importStage = "enable";
                 var enabled = setReceivedModEnabled.Invoke(transferAcceptCollection, importingDirectory, true);
                 if (enabled is not (PenumbraApiEc.Success or PenumbraApiEc.NothingChanged))
@@ -173,7 +173,7 @@ public sealed partial class Plugin
                     }
                     catch (Exception ex)
                     {
-                        transfers?.Act("reject", installedOffer);
+                        transfers?.Act("fail", installedOffer);
                         TransferFailure(ex.Message);
                         return;
                     }
@@ -187,14 +187,7 @@ public sealed partial class Plugin
                 ImportFailure(ex); // Record the original failure before any cleanup can obscure it.
                 // Do not claim completion before Penumbra confirms installation and activation.
                 // Roll back only this fresh generated import, never a pre-existing user mod.
-                if (importingDirectory.StartsWith("EmoteShelfReceived_", StringComparison.Ordinal) &&
-                    Guid.TryParseExact(importingDirectory["EmoteShelfReceived_".Length..], "N", out _))
-                {
-                    try { if (transferAcceptCollection != Guid.Empty) setReceivedModEnabled.Invoke(transferAcceptCollection, importingDirectory, false); }
-                    catch (Exception rollback) { Log.Warning("Received import deactivation failed: {Type}", rollback.GetType().Name); }
-                    // Do not race Penumbra's background file compaction with directory deletion.
-                    // Keep this isolated copy for inspection; never report activation as successful.
-                }
+                DeactivateFailedImport();
                 importingDirectory = "";
             }
         }
@@ -203,6 +196,9 @@ public sealed partial class Plugin
     private void ImportFailure(Exception ex)
     {
         transferImportFailed = true;
+        acceptedTransferLaunch = null;
+        if (transfers == transferAcceptedClient && importingOffer.Length > 0)
+            transfers?.Act("fail", importingOffer);
         importFailureKind = ex switch
         {
             ArgumentException => "argument",
@@ -224,6 +220,43 @@ public sealed partial class Plugin
         TransferFailure(code);
         transferMessage += "\n" + T("Установка или включение не завершены. Файлы не удалены; проверь мод в Penumbra. Код ошибки указан выше.",
             "Installation or activation did not complete. Files were not deleted; check the mod in Penumbra. The error code is shown above.");
+    }
+
+    private void RequireImportAuthorization()
+    {
+        if (transfers is null || transfers != transferAcceptedClient || !LinkFresh ||
+            transfers.Offer is not { Incoming: true, State: "ready" } offer || offer.Id != importingOffer ||
+            transferAcceptOffer != importingOffer || transferAcceptCollection == Guid.Empty ||
+            Objects.LocalPlayer is not { } local || LinkIdentity(local) != transferAcceptIdentity)
+            throw new InvalidOperationException("penumbra_collection_changed");
+        var (valid, _, collection) = getCollection.Invoke(local.ObjectIndex);
+        if (!valid || collection.Id != transferAcceptCollection)
+            throw new InvalidOperationException("penumbra_collection_changed");
+    }
+
+    private void DeactivateFailedImport()
+    {
+        if (!importingDirectory.StartsWith("EmoteShelfReceived_", StringComparison.Ordinal) ||
+            !Guid.TryParseExact(importingDirectory["EmoteShelfReceived_".Length..], "N", out _)) return;
+        var collections = new HashSet<Guid>();
+        if (transferAcceptCollection != Guid.Empty) collections.Add(transferAcceptCollection);
+        try
+        {
+            if (receivedSettings.Invoke(importingDirectory, out var settings, ignoreTemporaryCollections: true) == PenumbraApiEc.Success)
+                collections.UnionWith(settings.Keys);
+        }
+        catch (Exception ex) { Log.Warning("Import cleanup collection query failed: {Type}", ex.GetType().Name); }
+        foreach (var collection in collections)
+        {
+            try
+            {
+                var result = setReceivedModEnabled.Invoke(collection, importingDirectory, false);
+                if (result is not (PenumbraApiEc.Success or PenumbraApiEc.NothingChanged or PenumbraApiEc.ModMissing))
+                    Log.Warning("Import cleanup deactivation failed: {Code}", result);
+            }
+            catch (Exception ex) { Log.Warning("Import cleanup deactivation failed: {Type}", ex.GetType().Name); }
+        }
+        // Keep the isolated copy: Penumbra may still be compacting its files.
     }
 
     private void TransferFailure(string code)
@@ -415,7 +448,12 @@ public sealed partial class Plugin
         {
             if (transfers.Error.Length == 0 && offer.State == "offered")
                 ImGui.TextUnformatted(T("Ожидаем принятия", "Waiting for acceptance"));
-            if (ImGui.Button(T("Отмена", "Cancel"))) transfers.Act(offer.Incoming ? "reject" : "cancel", offer.Id);
+            if (ImGui.Button(T("Отмена", "Cancel")))
+            {
+                transferAcceptOffer = ""; // Revoke activation immediately, not after the next relay poll.
+                transferExtractionCancellation?.Cancel();
+                transfers.Act(offer.Incoming ? "reject" : "cancel", offer.Id);
+            }
         }
     }
 

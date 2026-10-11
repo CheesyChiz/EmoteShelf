@@ -7,6 +7,21 @@ from transfers import Transfers
 
 
 class TransferTests(unittest.TestCase):
+    def test_import_failure_notifies_sender_and_is_retry_safe(self):
+        key = self.act(self.a, **self.offer)['transfer']['id']
+        with self.assertRaises(ValueError): self.act(self.b, action='fail', id=key)
+        self.act(self.b, action='accept', id=key)
+        self.act(self.a, action='upload', id=key, offset=0, chunk=base64.b64encode(self.payload).decode())
+        with self.assertRaises(ValueError): self.act(self.a, action='fail', id=key)
+        with self.assertRaises(ValueError): self.act(self.b, action='fail', id=key, reason='untrusted')
+        self.assertEqual(self.act(self.b, action='fail', id=key)['outcome'], 'installation_failed')
+        self.assertFalse(self.store.items)
+        self.assertEqual(self.act(self.b, action='fail', id=key)['outcome'], 'installation_failed')
+        self.assertEqual(self.act(self.a, action='poll')['outcome'], 'installation_failed')
+        self.assertIsNone(self.links.action(self.a)['launch'])
+        self.assertIsNone(self.links.action(self.b)['launch'])
+        with self.assertRaises(ValueError): self.act(self.a, action='fail', id=key)
+
     def test_shared_launch_waits_for_import_and_requires_new_clients(self):
         self.setUp()
         launch = json.dumps(dict(PairId='1'*64, Family='2'*64, SenderCommand='3'*64, SenderRole='4'*64))

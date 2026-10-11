@@ -18,6 +18,7 @@ class Transfers:
         self.items = {}
         self.cooldowns = {}
         self.outcomes = {}
+        self.failed_receipts = {}
 
     def finish(self, key, outcome):
         item = self.items.pop(key)
@@ -31,6 +32,7 @@ class Transfers:
                 self.finish(key, 'expired')
         self.cooldowns = {k: v for k, v in self.cooldowns.items() if k in users and v > self.clock()}
         self.outcomes = {k: v for k, v in self.outcomes.items() if k in users and v[1] > self.clock()}
+        self.failed_receipts = {k: v for k, v in self.failed_receipts.items() if k in users and v[1] > self.clock()}
 
     def action(self, links, token, data, protocol=4):
         # Lock order: only the existing link lock. An unlink invalidates both directions.
@@ -78,15 +80,17 @@ class Transfers:
             else:
                 key = data.get('id')
                 item = self.items.get(key) if isinstance(key, str) else None
+                if action == 'fail' and set(data) == {'action', 'id'} and self.failed_receipts.get(token, (None, 0))[0] == key:
+                    return dict(outcome='installation_failed', transfer=None)
                 if not item or token not in (item['sender'], item['receiver']):
                     raise ValueError('transfer_expired')
                 incoming = token == item['receiver']
                 if action == 'accept' and incoming and item['state'] == 'offered' and set(data) == {'action', 'id'}:
                     item['state'] = 'accepted'
-                elif action in ('reject', 'complete', 'cancel') and set(data) == {'action', 'id'}:
-                    if (action in ('reject', 'complete') and not incoming) or (action == 'cancel' and incoming):
+                elif action in ('reject', 'complete', 'cancel', 'fail') and set(data) == {'action', 'id'}:
+                    if (action in ('reject', 'complete', 'fail') and not incoming) or (action == 'cancel' and incoming):
                         raise ValueError('transfer_role')
-                    if action == 'complete' and item['state'] != 'ready':
+                    if action in ('complete', 'fail') and item['state'] != 'ready':
                         raise ValueError('transfer_not_ready')
                     if action == 'complete' and item['launch']:
                         try:
@@ -103,7 +107,9 @@ class Transfers:
                             sender['offer'] = receiver['offer'] = dict(id=fields[0], family=fields[1],
                                 command=fields[2], role=fields[3], sender=item['sender'],
                                 status='accepted', until=self.clock()+60)
-                    self.finish(key, {'complete': 'completed', 'reject': 'declined', 'cancel': 'cancelled'}[action])
+                    if action == 'fail':
+                        self.failed_receipts[token] = (key, self.clock()+60)
+                    self.finish(key, {'complete': 'completed', 'reject': 'declined', 'cancel': 'cancelled', 'fail': 'installation_failed'}[action])
                 elif action == 'upload' and not incoming and item['state'] == 'accepted' and set(data) == {'action', 'id', 'offset', 'chunk'}:
                     if type(data['offset']) is not int or data['offset'] != len(item['payload']) or not isinstance(data['chunk'], str) or len(data['chunk']) > 4*((self.CHUNK+2)//3):
                         raise ValueError('transfer_chunk')

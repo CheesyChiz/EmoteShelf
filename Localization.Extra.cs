@@ -12,6 +12,7 @@ internal static partial class Localization
         }
     }
     private const string Additional = """
+The recipient downloaded the mod, but installation, activation or playback preparation failed. Details are available on the recipient's client; the transfer ended without confirmation of success.|相手がMODをダウンロードしましたが、インストール、有効化、または再生準備に失敗しました。詳細は受信側で確認してください。成功確認なしで転送を終了しました。|Der Empfänger hat die Mod heruntergeladen, aber Installation, Aktivierung oder Wiedergabevorbereitung ist fehlgeschlagen. Details stehen beim Empfänger; die Übertragung endete ohne Erfolgsbestätigung.|Le destinataire a téléchargé le mod, mais l’installation, l’activation ou la préparation de la lecture a échoué. Les détails sont disponibles chez le destinataire ; le transfert est terminé sans confirmation de réussite.
 Installation or activation did not complete. Files were not deleted; check the mod in Penumbra. The error code is shown above.|インストールまたは有効化が完了しませんでした。ファイルは削除されていません。PenumbraでMODを確認してください。エラーコードは上に表示されています。|Installation oder Aktivierung nicht abgeschlossen. Dateien wurden nicht gelöscht; prüfe die Mod in Penumbra. Der Fehlercode steht oben.|L’installation ou l’activation n’a pas abouti. Les fichiers n’ont pas été supprimés ; vérifiez le mod dans Penumbra. Le code d’erreur figure ci-dessus.
 {0:F1} MiB · transfer expires in {1}s|{0:F1} MiB · 転送期限まで{1}秒|{0:F1} MiB · Übertragung läuft in {1}s ab|{0:F1} Mio · expiration du transfert dans {1}s
 Uploading to relay|中継サーバーへアップロード中|Upload zum Relay|Envoi au relais

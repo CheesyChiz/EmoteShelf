@@ -8,7 +8,8 @@ internal static class TransferClientTests
 {
     private sealed class Fake(bool corrupt = false, bool changeLaunch = false, bool upload = false) : HttpMessageHandler
     {
-        internal bool Accepted, Downloaded, Completed;
+        internal bool Accepted, Downloaded, Completed, Failed;
+        internal int FailureAttempts;
         internal byte[]? Upload;
         internal readonly MemoryStream Uploaded = new();
         private bool dropped;
@@ -45,6 +46,13 @@ internal static class TransferClientTests
                 }
                 if (action == "accept") Accepted = true;
                 if (action == "complete") Completed = true;
+                if (action == "fail")
+                {
+                    Failed = true;
+                    if (++FailureAttempts == 1) throw new TaskCanceledException("Lost failure acknowledgement");
+                }
+                if (Failed)
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"transfer\":null,\"outcome\":\"installation_failed\"}") };
                 if (action == "download")
                 {
                     if (!Accepted) throw new Exception("Unsolicited download");
@@ -65,6 +73,22 @@ internal static class TransferClientTests
     }
     internal static async Task Run()
     {
+        using (var relay = new Fake())
+        {
+            using var link = new LinkClient(new string('a', 64), relay);
+            await Until(() => link.Snapshot.State == "linked");
+            using var transfer = new TransferClient(link, Fake.Partner, relay);
+            await Until(() => transfer.Offer is not null);
+            transfer.Accept(Fake.Id);
+            ReceivedPackage? received = null;
+            await Until(() => (received ??= transfer.TakeReceived()) is not null);
+            transfer.Act("fail", Fake.Id);
+            await Until(() => transfer.Outcome == "installation_failed");
+            if (relay.FailureAttempts != 2 || relay.Completed || transfer.Offer is not null)
+                throw new Exception("Import failure did not survive a lost acknowledgement or falsely completed");
+            transfer.Dispose(); await transfer.Completion;
+            link.Dispose(); await link.Completion;
+        }
         foreach (var bytes in new[] { RandomNumberGenerator.GetBytes(256 * 1024), Enumerable.Repeat((byte)251, 256 * 1024).ToArray() })
         using (var content = TransferClient.RequestContent(new { action = "upload", id = Fake.Id, offset = 0,
             chunk = Convert.ToBase64String(bytes) }))

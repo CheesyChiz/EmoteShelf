@@ -40,6 +40,13 @@ internal static class ModPackageTests
         try
         {
             Directory.CreateDirectory(root);
+            using (var cancelled = new CancellationTokenSource())
+            {
+                cancelled.Cancel();
+                try { ModPackage.ExtractNew(Package(), root, cancelled.Token); throw new Exception("Cancelled extraction proceeded"); }
+                catch (OperationCanceledException) { }
+                if (Directory.EnumerateFileSystemEntries(root).Any()) throw new Exception("Cancelled extraction created files");
+            }
             var source = Path.Combine(root, "Source");
             Directory.CreateDirectory(source);
             File.WriteAllText(Path.Combine(source, "meta.json"), """
@@ -72,6 +79,13 @@ internal static class ModPackageTests
             original["Name"] = originalName;
             File.WriteAllText(sourceMeta, original.ToJsonString());
             var namedCopy = ModPackage.ExtractNew(ModPackage.PackMod(root, "Source"), root);
+            if (!File.ReadAllBytes(Path.Combine(root, namedCopy, "b.pap")).SequenceEqual(File.ReadAllBytes(Path.Combine(source, "b.pap"))))
+                throw new Exception("Unselected option payload changed in round trip");
+            using (var locked = new FileStream(Path.Combine(source, "a.pap"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+            {
+                try { ModPackage.PackMod(root, "Source"); throw new Exception("Locked required resource was silently skipped"); }
+                catch (IOException) { }
+            }
             using var namedMetadata = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(root, namedCopy, "meta.json")));
             if (namedMetadata.RootElement.GetProperty("Name").GetString() != originalName)
                 throw new Exception("Whole-mod transfer changed Unicode display name");
