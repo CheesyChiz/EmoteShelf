@@ -22,6 +22,7 @@ public sealed class Configuration : IPluginConfiguration
     public float PanelOpacity = 0.85f;
     public bool English;
     public bool PairEnabled;
+    public bool MaintainPairPhase = true;
     public bool PairDebug;
     // Old optional-upload preference does not acknowledge the new mandatory policy.
     public int DiagnosticsNoticeVersion;

@@ -6,6 +6,7 @@ LocalizationTests.Run();
 SoundRestartTests.Run();
 CarrierTests.Run();
 OffsetTests.Run();
+SyncTests.Run();
 
 static void Check(string name, int? actual, int? expected)
 {

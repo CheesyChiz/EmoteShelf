@@ -10,6 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from links import LinkStore
 from reports import Reports
 from transfers import Transfers
+from sync import exchange
 
 reports = None
 report_slots = threading.BoundedSemaphore(2)
@@ -153,6 +154,14 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allowed():
             return self.reply(429, dict(error='Rate limited'))
         try:
+            if self.path == '/v6/sync':
+                length = int(self.headers.get('Content-Length', '0'))
+                if not 0 < length <= 48000:
+                    return self.reply(413, dict(error='sync_body_size'))
+                data = json.loads(self.rfile.read(length))
+                if not isinstance(data, dict):
+                    raise ValueError('sync_schema')
+                return self.reply(200, exchange(links, self.token(), data))
             if self.path in ('/v4/transfer', '/v5/transfer'):
                 length = int(self.headers.get('Content-Length', '0'))
                 if not 0 < length <= 360000:

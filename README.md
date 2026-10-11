@@ -2,7 +2,19 @@
 
 Experimental Dalamud plugin for selecting Penumbra animation mods, saving role/options bookmarks, and coordinating playback with one linked partner. Open with `/es` or `/eshelf`.
 
-## 0.3.8.0 testing build
+## 0.3.9.0 testing build
+
+Settings → Required plugins now includes fixed project links, repository copying, a shortcut to Dalamud's Experimental settings and an installer search for each dependency. Repository addition and installation use Dalamud's own confirmation controls; the plugin does not rewrite Dalamud configuration or install DLLs privately. Verified sources: Penumbra's xivdev repository, Caraxi's SimpleHeels repository, Etheirys' Brio repository and Lightless's official manifest/source repository. Avoid adding duplicate repositories.
+
+The wide library window has a compact partner sidebar; narrow windows retain two panes. Pair controls and phase/resource status have a dedicated Partner tab. Mod inspection is collapsed, keeping playback actions prominent.
+
+### Own resource verification and phase control
+
+Both clients now need 0.3.9.0 for new pair launches. `/v6/sync` is bound to an accepted launch or its completed replay agreement and the current link capability. It exchanges at most 128 game asset paths and SHA-256 hashes (no local disk paths/file bodies), verification flags and primary loop time/duration. Peer samples become unusable after two seconds and are removed after three seconds; unlink removes them. Samples are not stored in diagnostic reports. The renewed first-use notice discloses this exchange.
+
+After local preparation, each client hashes selected resources, verifies the peer's resources using the peer's locally resolved Penumbra collection, and waits for reciprocal verification before readiness. Selected-command PAPs are filtered through the game model redirect table; other emotes' PAPs are excluded. Applicable declared sound/VFX dependencies are also checked. Oversized manifests, unsupported/unresolved resources, stale clients or mismatches prevent launch with a resource-verification reason. A matching disk file and Penumbra mapping does **not** prove that the engine has already loaded that resource or started its audio channel. This is stronger evidence than Lightless's handled-actor list, not a fabricated download-complete IPC.
+
+While the same accepted animation runs, each client measures its own unambiguous primary animation control. Equal-duration single-control loops can be compared with sample-age and round-trip estimates. Four consecutive deviations over 200 ms (low-latency samples only) request the existing agreed shared restart from one designated client, at most once every 30 seconds. Maintain pair phase can disable automatic restart. Blended tracks, unequal durations, stale samples and ambiguous states are not corrected. This is measured best-effort drift correction, not continuous frame-lock. Music restarts through the ordinary playback/redraw path; its actual channel position is not measured or seeked.
 
 Automated checks cover packaging, consent, relay state, localization, pose rules and conversion. They do **not** establish in-game compatibility, audible music, or frame-perfect two-client playback. Both participants should use this version for transfer-and-launch and shared restart.
 
@@ -24,7 +36,7 @@ When an ordinary animation with selected SCD resources replaces an active emote 
 
 ### Pair launch
 
-Penumbra is required for playback; Lightless Sync is required for pair features. Enable pair mode on both clients and establish Lightless synchronization. Right-click the partner → Emote Shelf invitation; acceptance links one partner but does not authorize movement or playback. No party, room, or maintained target is required.
+Penumbra is required for playback; Lightless Sync is required for pair features. Enable pair mode on both clients in Partner and establish Lightless synchronization. Right-click the partner → Emote Shelf invitation; acceptance links one partner but does not authorize movement or playback. No party, room, or maintained target is required.
 
 Pair or Shift+bookmark offers an animation. The partner chooses their role and accepts or declines. Start nearby, standing still, out of combat, unmounted. Alignment is mandatory: one actor anchors, the other approaches; fine correction aims for ≤0.01 yalms, while the final position check permits ≤0.1 yalms. Facing is checked separately. No character height, body scale or skeleton changes are made. Coordinates come from the locally visible linked partner, not a remote movement command.
 
@@ -34,7 +46,7 @@ After both clients report a successful dispatch, Restart accepted animation on b
 
 ### Transfer a mod, then launch together
 
-Save both intended roles as panel bookmarks. From the sender's animation choose Send mod with playback offer, then select the partner's saved role. The mod is packaged automatically from its manifests and referenced assets; manual PMP export is not needed. The partner sees their role/options and accepts installation, activation, alignment and shared start in one action. Only after installation, activation and local role validation does the relay create the accepted pair attempt. Both clients then prepare, align and start through the ordinary readiness barrier.
+From the sender's animation choose Send mod with playback offer, then choose the partner's emote, options and pose directly in the transfer window. Saved bookmarks are optional shortcuts, not a prerequisite. Choose the partner's body options rather than assuming your own race/model. Identical role selections are blocked. The mod is packaged automatically from its manifests and referenced assets; manual PMP export is not needed. The partner sees their role/options and accepts installation, activation, alignment and shared start in one action. Only after installation, activation and local role validation does the relay create the accepted pair attempt. Both clients then prepare, verify resources, align and start through the ordinary readiness barrier.
 
 Plain transfers also support manually selected ZIP-based PMP files and never dispatch an emote command. The sender acknowledges redistribution responsibility once; the recipient acknowledges security risks on first receipt and accepts **every package** separately. Existing mods are never merged: imports have fresh directories and identities. Activation is bound to the character and Penumbra collection captured at acceptance. Enabling can immediately affect appearance, idle, sound and VFX, including other actors sharing that collection. Activation failure requests rollback of only this fresh import; failure to prepare a role leaves the installed mod available for inspection.
 

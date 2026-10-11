@@ -19,8 +19,8 @@ class LinkStore:
         other = item['peer'] or item['pending']
         peer = self.users.get(other)
         if peer:
-            peer.update(peer=None, pending=None, incoming=False, invitation='', replay=None)
-        item.update(peer=None, pending=None, incoming=False, invitation='', replay=None)
+            peer.update(peer=None, pending=None, incoming=False, invitation='', replay=None, sync=None)
+        item.update(peer=None, pending=None, incoming=False, invitation='', replay=None, sync=None)
 
     def clear_offer(self, token):
         item = self.users.get(token)
@@ -33,6 +33,8 @@ class LinkStore:
 
     def prune(self):
         for token, item in list(self.users.items()):
+            if item.get('sync') and self.clock() - item['sync']['received'] > 3:
+                item['sync'] = None
             if self.clock() - item['seen'] > 8:
                 self.clear(token)
                 del self.users[token]

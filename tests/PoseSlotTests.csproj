@@ -6,6 +6,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../SyncClient.cs" Link="SyncClient.cs" />
+    <Compile Include="../SyncRules.cs" Link="SyncRules.cs" />
+    <Compile Include="../ResourceProof.cs" Link="ResourceProof.cs" />
     <Compile Include="../LibraryCommands.cs" Link="LibraryCommands.cs" />
     <Compile Include="../ModPackage.cs" Link="ModPackage.cs" />
     <Compile Include="../TransferClient.cs" Link="TransferClient.cs" />

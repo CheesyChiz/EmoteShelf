@@ -16,7 +16,7 @@ DETAILS |= {'preflight', 'deadline', 'partner_identity', 'lightless_check', 'act
             'pose_setting', 'pair_transport', 'heartbeat', 'proposal', 'alignment',
             'local_movement', 'alignment_consent', 'partner_movement', 'prepare_mod',
             'post_prepare_alignment', 'prepared_action', 'start_deadline', 'validate_mod',
-            'final_alignment', 'dispatch', 'prepare_validation', 'stand_up'}
+            'final_alignment', 'dispatch', 'prepare_validation', 'stand_up', 'resource_verification'}
 
 
 def validate(data):

@@ -213,6 +213,7 @@ public sealed partial class Plugin
 
     private void CancelPair(string? reason = null, bool failure = true)
     {
+        StopPairSync();
         CancelCarrierPlayback();
         RestoreOffset();
         if (pairSession is not null && reason is not null && failure)
@@ -343,6 +344,15 @@ public sealed partial class Plugin
             {
                 if (!pairPreparing && pairHeldCommand.Length > 0 && !pairReadySent)
                 {
+                    pairCheckpoint = "resource_verification";
+                    if (!PairResourcesReady())
+                    {
+                        if (now > pairDeadline - 1500)
+                            throw new InvalidOperationException(T("Файлы партнёра не подтверждены. Дождитесь синхронизации Lightless и обновите Emote Shelf у обоих.", "Partner resources are not confirmed. Wait for Lightless synchronization and update Emote Shelf on both clients."));
+                        pairConfirmUntil = now + 5000;
+                        pairMessage = T("Ожидаем совпадения файлов партнёра", "Waiting for matching partner files");
+                        return;
+                    }
                     pairCheckpoint = "post_prepare_alignment";
                     if (now > pairConfirmUntil) throw new InvalidOperationException(T("Координаты и поворот не совпали после подготовки. Запуск отменён.", "Position/facing did not match after preparation. Launch cancelled."));
                     if (!snapshot.Anchor && !pairRefined && !pairRestart)
@@ -383,6 +393,7 @@ public sealed partial class Plugin
             if (now - snapshot.StartAt > 250 || now - snapshot.ReceivedAt > 650)
                 throw new InvalidOperationException(T("Пропущено время старта или потеряна связь. Повторите запуск.", "Start was missed or connection lost. Please retry."));
             pairCheckpoint = "validate_mod";
+            if (!PairResourcesReady()) throw new InvalidOperationException(T("Файлы партнёра не подтверждены. Дождитесь синхронизации Lightless и обновите Emote Shelf у обоих.", "Partner resources are not confirmed. Wait for Lightless synchronization and update Emote Shelf on both clients."));
             ValidatePairSelection();
             pairCheckpoint = "final_alignment";
             if (!PairRules.ReadyToLaunch(local.Position, local.Rotation, target.Position, target.Rotation))
@@ -451,6 +462,7 @@ public sealed partial class Plugin
         if (!config.PairEnabled) return;
         DrawLinkSettings();
         DrawSessionTools();
+        DrawSyncStatus();
         ImGui.TextDisabled(LightlessLoaded() ? Localization.Runtime(config.Language, "Lightless Sync: OK") : T("Требуется Lightless Sync", "Lightless Sync required"));
     }
 

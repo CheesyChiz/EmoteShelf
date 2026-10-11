@@ -19,17 +19,29 @@ public sealed partial class Plugin
     private void DrawDependencies()
     {
         if (!ImGui.CollapsingHeader(T("Нужные плагины", "Required plugins"))) return;
-        Dependency("Penumbra", T("Библиотека и запуск", "Library and playback"), IntegrationLoaded("Penumbra"));
-        Dependency("Lightless Sync", T("Запуск в паре", "Pair launch"), LightlessLoaded());
-        Dependency("SimpleHeels", T("Подстройка положения", "Position adjustment"), IntegrationLoaded("SimpleHeels"));
-        Dependency("Brio", "GPose", IntegrationLoaded("Brio"));
+        ImGui.TextWrapped(T("Скопируй репозиторий, открой настройки Dalamud → Experimental → Custom Plugin Repositories, вставь адрес, нажми + и сохрани. Затем нажми «Найти плагин» и установи его. Не добавляй повторно уже подключённый репозиторий.", "Copy the repository, open Dalamud settings → Experimental → Custom Plugin Repositories, paste the URL, press + and save. Then choose Find plugin and install it. Do not add a repository twice."));
+        Dependency("Penumbra", T("Библиотека и запуск", "Library and playback"), IntegrationLoaded("Penumbra"), "https://raw.githubusercontent.com/xivdev/Penumbra/master/repo.json", "https://github.com/xivdev/Penumbra");
+        Dependency("Lightless Sync", T("Запуск в паре", "Pair launch"), LightlessLoaded(), "https://repo.lightless-sync.org/", "https://git.lightless-sync.org/Lightless-Sync/LightlessClient");
+        Dependency("SimpleHeels", T("Подстройка положения", "Position adjustment"), IntegrationLoaded("SimpleHeels"), "https://repo.caraxian.com", "https://github.com/Caraxi/SimpleHeels");
+        Dependency("Brio", "GPose", IntegrationLoaded("Brio"), "https://raw.githubusercontent.com/Etheirys/WorldOfEtheirys/main/repo.json", "https://github.com/Etheirys/Brio");
         ImGui.TextWrapped(T("Каждый плагин нужен только для своей функции. Отсутствие Brio или SimpleHeels не мешает обычному запуску анимаций.",
             "Each plugin is required only for its feature. Missing Brio or SimpleHeels does not block ordinary animation playback."));
-        void Dependency(string name, string purpose, bool ready)
+        void Dependency(string name, string purpose, bool ready, string repository, string project)
         {
+            ImGui.PushID(name);
+            ImGui.Separator();
             ImGui.TextColored(ready ? new Vector4(.5f, .85f, .65f, 1) : new Vector4(1, .7f, .4f, 1),
                 name + " — " + (ready ? T("Загружен", "Loaded") : T("Нужно установить или включить", "Install or enable")));
             ImGui.SameLine(); ImGui.TextDisabled(purpose);
+            if (ImGui.SmallButton(T("Скопировать репозиторий", "Copy repository"))) ImGui.SetClipboardText(repository);
+            ImGui.SameLine();
+            if (ImGui.SmallButton(T("Настройки Dalamud", "Dalamud settings"))) Pi.OpenDalamudSettingsTo(Dalamud.Interface.SettingsOpenKind.Experimental);
+            if (ImGui.SmallButton(T("Найти плагин", "Find plugin"))) Pi.OpenPluginInstallerTo(Dalamud.Interface.PluginInstallerOpenKind.AllPlugins, name);
+            ImGui.SameLine();
+            if (ImGui.SmallButton(T("Сайт проекта", "Project website"))) Dalamud.Utility.Util.OpenLink(project);
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(project);
+            ImGui.TextWrapped(repository);
+            ImGui.PopID();
         }
     }
 

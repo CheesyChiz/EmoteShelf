@@ -57,13 +57,20 @@ def main():
         for token in (a, b):
             accepted = link(token)['launch']
             assert accepted['id'] == pair_id and accepted['status'] == 'accepted'
+        sample = dict(attempt=pair_id, assets=[dict(path='chara/human/test.pap', sha256='a'*64)],
+                      verified=False, phase=1., duration=10., age=0.)
+        assert post('/v6/sync', sample, a)['peer'] is None
+        assert post('/v6/sync', sample, b)['peer']['assets'] == sample['assets']
+        sample['verified'] = True
+        post('/v6/sync', sample, a)
+        assert post('/v6/sync', sample, b)['peer']['verified'] is True
         link(a, 'finish_launch', invitation=pair_id)
         link(b, 'finish_launch', invitation=pair_id)
         replay = link(a, 'restart')['launch']
         assert replay['previous'] == pair_id and replay['status'] == 'accepted'
         assert link(b)['launch']['id'] == replay['id']
         link(a, 'cancel_launch', invitation=replay['id'])
-        print('HTTPS v5 consent, multi-chunk integrity/deletion, shared offer and agreed restart: passed')
+        print('HTTPS consent, multi-chunk integrity/deletion, shared offer, resource/phase exchange and agreed restart: passed')
     finally:
         for token in (a, b):
             if token:

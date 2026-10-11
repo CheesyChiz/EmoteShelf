@@ -4,6 +4,12 @@ anarchyclan.ru {
         file_server
     }
     @transfers path /v4/transfer /v5/transfer
+    handle /v6/sync {
+        request_body {
+            max_size 48KB
+        }
+        reverse_proxy 127.0.0.1:8765
+    }
     handle @transfers {
         request_body {
             max_size 360KB

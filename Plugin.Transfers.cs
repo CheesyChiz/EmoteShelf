@@ -234,16 +234,22 @@ public sealed partial class Plugin
                 ImGui.TextWrapped(T("Твоя роль: ", "Your role: ") + transferSenderRole.Name);
                 if (ImGui.BeginCombo(T("Роль партнёра", "Partner role"), transferReceiverRole?.Name ?? "—"))
                 {
+                    foreach (var mod in discovered.Where(m => m.Directory == transferSourceDirectory))
+                        if (ImGui.Selectable(mod.EmoteName + "##direct" + mod.Command))
+                        {
+                            try { transferReceiverRole = CreateBookmark(mod, null); }
+                            catch (Exception ex) { TransferFailure(ex.Message); }
+                        }
                     foreach (var role in config.Bookmarks.Where(b => b.ModDirectory == transferSourceDirectory && OfferRole(b) != OfferRole(transferSenderRole)))
                         if (ImGui.Selectable(role.Name)) transferReceiverRole = SnapshotBookmark(role);
                     ImGui.EndCombo();
                 }
-                ImGui.TextWrapped(T("Выбери роль партнёра из закладок этого мода. Принятие пакета разрешит установку, выравнивание и общий запуск.", "Choose the partner role from this mod's bookmarks. Accepting the package authorizes installation, alignment and a shared start."));
+                DrawTransferRoleOptions();
             }
             ImGui.TextWrapped(T("После установки: ", "After installation: ") + TransferLaunch.Decode(transferLaunchDraft)!.Label);
             if (ImGui.SmallButton(T("Без запуска", "Without playback"))) { transferLaunchDraft = ""; transferSenderRole = transferReceiverRole = null; }
         }
-        ImGui.BeginDisabled(config.TransferNoticeVersion != 1 || transfers is null || transfers.Offer is not null || transfers.ProposalPending || transferSending is not null || (transferPath.Length == 0 && transferSourceDirectory.Length == 0) || (transferSenderRole is not null && transferReceiverRole is null));
+        ImGui.BeginDisabled(config.TransferNoticeVersion != 1 || transfers is null || transfers.Offer is not null || transfers.ProposalPending || transferSending is not null || (transferPath.Length == 0 && transferSourceDirectory.Length == 0) || (transferSenderRole is not null && (transferReceiverRole is null || OfferRole(transferSenderRole) == OfferRole(transferReceiverRole))));
         if (ImGui.Button(T("Предложить мод партнёру", "Offer mod to partner")))
         {
             var client = transfers!; var path = transferPath.Trim().Trim('"'); var launch = transferLaunchDraft;
@@ -355,6 +361,12 @@ public sealed partial class Plugin
         transferSenderRole = SnapshotBookmark(bookmark);
         transferReceiverRole = config.Bookmarks.Where(b => b.ModDirectory == bookmark.ModDirectory && OfferRole(b) != OfferRole(bookmark))
             .Select(SnapshotBookmark).FirstOrDefault();
+        if (transferReceiverRole is null)
+        {
+            var other = discovered.FirstOrDefault(m => m.Directory == bookmark.ModDirectory && m.Command != bookmark.Command)
+                ?? discovered.FirstOrDefault(m => m.Directory == bookmark.ModDirectory);
+            if (other is not null) transferReceiverRole = CreateBookmark(other, null);
+        }
         transferSourceDirectory = bookmark.ModDirectory;
         transferLaunchDraft = new TransferLaunch(bookmark.Name[..Math.Min(200, bookmark.Name.Length)], bookmark.Command,
             bookmark.PoseIndex, bookmark.SavedOptions?.ToDictionary(p => p.Key, p => p.Value.ToList()) ?? []).Encode();

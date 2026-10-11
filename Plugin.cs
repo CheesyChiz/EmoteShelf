@@ -359,6 +359,7 @@ public sealed partial class Plugin : IDalamudPlugin
         UpdateLink();
         UpdateTransfers();
         UpdateAutomaticPair();
+        UpdatePairSync();
         UpdateOffset();
         UpdateCarrier();
         pairAlignment?.Update();
@@ -753,9 +754,13 @@ public sealed partial class Plugin : IDalamudPlugin
         ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(10, 6));
         try
         {
-        ImGui.SetNextWindowSize(new Vector2(850, 650), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(1120, 720), ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSizeConstraints(new Vector2(540, 360), new Vector2(1600, 1200));
         if (!ImGui.Begin("Emote Shelf##settings", ref settingsOpen)) { ImGui.End(); return; }
+        ImGui.TextColored(new Vector4(.76f, .65f, .95f, 1), "EMOTE SHELF");
+        ImGui.SameLine();
+        ImGui.TextDisabled("0.3.9 · " + (LinkFresh && LinkedPartner is { } headerPartner ? headerPartner.Name.TextValue : T("Партнёр не подключён", "No partner linked")));
+        ImGui.Separator();
         if (lastLaunchFailure.Length > 0)
         {
             ImGui.TextColored(new Vector4(1f, .72f, .4f, 1f), T("Последний запуск не состоялся", "Last launch did not complete"));
@@ -773,6 +778,7 @@ public sealed partial class Plugin : IDalamudPlugin
                 ImGui.EndTabItem();
             }
             if (ImGui.BeginTabItem(T("Панель", "Panel") + "###panel")) { DrawPanelTab(); ImGui.EndTabItem(); }
+            if (ImGui.BeginTabItem(T("Пара", "Partner") + "###partner", selectPartnerTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None)) { selectPartnerTab = false; DrawPairSettings(); ImGui.EndTabItem(); }
             if (ImGui.BeginTabItem(T("Передача модов", "Mod transfers") + "###transfers", selectTransfersTab ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None)) { selectTransfersTab = false; DrawTransfers(); ImGui.EndTabItem(); }
             if (ImGui.BeginTabItem(T("Как пользоваться", "How to use") + "###help")) { DrawHelpTab(); ImGui.EndTabItem(); }
             if (ImGui.BeginTabItem(T("Настройки", "Settings") + "###settings")) { DrawAdvancedTab(); ImGui.EndTabItem(); }
@@ -807,6 +813,8 @@ public sealed partial class Plugin : IDalamudPlugin
         if (groups.Length > 0 && !groups.Any(g => g.Key == selectedModDirectory)) selectedModDirectory = groups[0].Key;
 
         var available = ImGui.GetContentRegionAvail();
+        var showSessionRail = available.X >= 1000;
+        var sessionRailWidth = showSessionRail ? 230f : 0;
         var leftWidth = Math.Clamp(available.X * .34f, 230, 340);
         var browserHeight = Math.Max(100, available.Y - ImGui.GetTextLineHeightWithSpacing() - 12);
         ImGui.BeginChild("##leftPane", new Vector2(leftWidth, browserHeight), false);
@@ -902,7 +910,7 @@ public sealed partial class Plugin : IDalamudPlugin
         ImGui.PopID();
         ImGui.EndChild();
         ImGui.SameLine();
-        if (ImGui.BeginChild("##modDetails", new Vector2(0, browserHeight), true))
+        if (ImGui.BeginChild("##modDetails", new Vector2(showSessionRail ? Math.Max(300, available.X-leftWidth-sessionRailWidth-20) : 0, browserHeight), true))
         {
             var selected = discovered.Where(m => m.Directory == selectedModDirectory && (!config.HiddenMods.Contains(m.Directory) || m.Directory == rightClickMod)).ToArray();
             if (selected.Length == 0) ImGui.TextDisabled(T("Выбери мод слева.", "Select a mod on the left."));
@@ -932,11 +940,17 @@ public sealed partial class Plugin : IDalamudPlugin
                     ImGui.EndPopup();
                 }
                 ImGui.Separator();
-                DrawModInspection(selected[0]);
+                if (ImGui.CollapsingHeader(T("Проверить применение", "Check application"))) DrawModInspection(selected[0]);
                 foreach (var mod in selected.Where(MatchesLibraryFilter)) DrawEmoteCard(mod);
             }
         }
         ImGui.EndChild();
+        if (showSessionRail)
+        {
+            ImGui.SameLine();
+            if (ImGui.BeginChild("##sessionRail", new Vector2(0, browserHeight), true)) DrawSessionRail();
+            ImGui.EndChild();
+        }
         ImGui.Separator();
         var footer = status.Replace('\n', ' ').Replace('\r', ' ');
         var clippedFooter = footer;
@@ -1456,8 +1470,7 @@ public sealed partial class Plugin : IDalamudPlugin
         ImGui.TextUnformatted(Localization.Runtime(config.Language, "FAQ"));
         ImGui.TextWrapped(T("При обычном запуске плагин автоматически подберёт доступную эмоцию. Оригинал мода не изменится.", "Normal playback automatically selects an unlocked emote. The original mod stays unchanged."));
         if (ImGui.CollapsingHeader(T("Наборы, команды и передача модов", "Presets, commands and mod transfers")))
-            ImGui.TextWrapped(T("Сохрани обе роли в «Панели». У анимации выбери передачу с запуском и роль партнёра: пакет соберётся автоматически. Партнёр принимает установку, включение, выравнивание и общий запуск одной кнопкой. Обычный PMP можно передать без запуска. Обоим нужна версия 0.3.8.0 или новее.",
-                "Save both roles on Panel. From an animation, choose transfer with playback and the partner role: packaging is automatic. One acceptance authorizes installation, activation, alignment and a shared start. A plain PMP can be sent without playback. Both clients need 0.3.8.0 or newer."));
+            ImGui.TextWrapped(T("У анимации выбери передачу с запуском. Эмоцию, варианты и позу партнёра можно задать прямо при отправке — закладки не обязательны. Пакет соберётся автоматически. Партнёр одной кнопкой разрешает установку, включение, проверку файлов, выравнивание и общий запуск. Обоим нужна версия 0.3.9.0 или новее.", "Choose transfer with playback on an animation. Select your partner's emote, options and pose in the transfer window; bookmarks are optional. Packaging is automatic. One acceptance authorizes installation, activation, file verification, alignment and a shared start. Both clients need 0.3.9.0 or newer."));
             ImGui.TextWrapped(T("У роли можно сохранить временную подстройку SimpleHeels; после анимации вернётся прежняя, если ты не изменил её вручную. В GPose можно сохранить, применить и отменить позу выбранного актёра через Brio API 3. Общий перезапуск повторяет только ранее принятую анимацию с тем же партнёром; локальный сброс влияет лишь на твой экран. Совпадение музыки и фазы не гарантируется.",
                 "A role can save a temporary SimpleHeels adjustment; the previous one is restored after playback unless you changed it manually. In GPose, save, apply and undo a selected actor's pose through Brio API 3. Shared restart repeats only the previously accepted animation with the same partner; local reset affects only your screen. Matching music and phase are not guaranteed."));
         if (ImGui.CollapsingHeader(T("Как добавить и запустить эмоцию?", "How do I add and play an emote?")))
@@ -1486,8 +1499,8 @@ public sealed partial class Plugin : IDalamudPlugin
     private void DrawAdvancedTab()
     {
         DrawDependencies();
+        if (ImGui.Button(T("Управление парой", "Partner controls"))) selectPartnerTab = true;
         if (ImGui.CollapsingHeader(T("Обязательная диагностика", "Required diagnostics"))) DrawReportSettings();
-        DrawPairSettings();
         var languages = new[] { ("ru", "Русский"), ("en", "English"), ("ja", "日本語"), ("de", "Deutsch"), ("fr", "Français") };
         var selectedLanguage = languages.FirstOrDefault(x => x.Item1 == config.Language).Item2 ?? "Русский";
         ImGui.SetNextItemWidth(180);
@@ -1553,6 +1566,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        StopPairSync();
         RestoreOffset();
         CancelCarrierPlayback();
         errorReports.Dispose();

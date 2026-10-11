@@ -38,6 +38,17 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.request('GET', '/v1/session/' + 'x'*43)[0], 404)
         self.assertEqual(self.request('GET', '/v1/session', token='x'*43)[0], 404)
 
+    def test_sync_private_schema(self):
+        server.rates.clear()
+        self.assertEqual(self.request('POST', '/v6/sync', {'attempt': '1'*64})[0], 400)
+        self.assertEqual(self.request('GET', '/v6/sync')[0], 404)
+        connection = http.client.HTTPConnection('127.0.0.1', self.http.server_port, timeout=2)
+        connection.request('POST', '/v6/sync', headers={'Content-Length':'48001'})
+        response = connection.getresponse()
+        self.assertEqual(response.status, 413)
+        response.read()
+        connection.close()
+
     def test_transfer_route_is_private_and_bounded(self):
         server.rates.clear()
         self.assertEqual(self.request('POST', '/v4/transfer', {'action': 'poll'})[0], 400)
