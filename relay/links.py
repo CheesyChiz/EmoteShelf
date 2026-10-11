@@ -96,6 +96,11 @@ class LinkStore:
                         raise ValueError('Dance options too large')
                 item['replay'] = peer['replay'] = None
                 item['offer'] = peer['offer'] = dict(**offer, sender=token, status='waiting', until=self.clock()+60)
+            elif action == 'request_mod':
+                current = item['offer']
+                if not current or current['id'] != invitation or current['sender'] == token or current['status'] != 'waiting':
+                    raise ValueError('Not an incoming waiting launch')
+                current['missing_mod'] = True
             elif action in ('accept_launch', 'reject_launch', 'cancel_launch', 'finish_launch'):
                 current = item['offer']
                 if not current or current['id'] != invitation:
@@ -153,6 +158,6 @@ class LinkStore:
             launch = dict(id=current['id'], family=current['family'], command=current['command'], role=current['role'],
                           dance=current.get('dance', False), options=current.get('options'),
                           incoming=current['sender'] != token, status=current['status'], remaining=max(0, int(current['until']-self.clock())),
-                          previous=current.get('previous', '')) if current else None
+                          previous=current.get('previous', ''), missing_mod=current.get('missing_mod', False)) if current else None
             return dict(state=state, partner=peer['identity'] if peer else '', invitation=item['invitation'], current_peer=bool(peer and peer.get('dance')),
                         remaining=max(0, int(item['until']-self.clock())) if item['pending'] else 0, launch=launch)

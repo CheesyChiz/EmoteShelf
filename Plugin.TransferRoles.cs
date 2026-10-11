@@ -2,12 +2,11 @@ using Dalamud.Bindings.ImGui;
 namespace EmoteShelf;
 public sealed partial class Plugin
 {
-    private void DrawTransferRoleOptions()
+    private void DrawTransferRoleOptions(Bookmark? selectedRole = null)
     {
-        if (transferReceiverRole is not { } role) return;
+        if ((selectedRole ?? transferReceiverRole) is not { } role) return;
         var mod = discovered.FirstOrDefault(m => m.Directory == role.ModDirectory && m.Command == role.Command);
         if (mod is null) return;
-        ImGui.TextWrapped(T("Настрой роль для персонажа партнёра. Закладка не нужна; одинаковый набор у обоих отправить нельзя.", "Choose options for your partner's character. No bookmark is needed; both roles cannot use the identical selection."));
         role.SavedOptions ??= [];
         ImGui.PushID("transferRoleOptions");
         foreach (var group in mod.Variants.GroupBy(v => v.Group))
@@ -40,7 +39,7 @@ public sealed partial class Plugin
             foreach (var pose in mod.PoseSlots) if (ImGui.Selectable(pose.ToString("00"))) role.PoseIndex = pose;
             ImGui.EndCombo();
         }
-        role.Name = mod.EmoteName;
+        role.Name = mod.EmoteName + (role.PoseIndex is { } slot ? $" · {slot:00}" : "");
         ImGui.PopID();
     }
 }

@@ -386,7 +386,20 @@ public sealed partial class Plugin
         {
             if (transferSenderRole is not null)
             {
-                ImGui.TextWrapped(T("Твоя роль: ", "Your role: ") + transferSenderRole.Name);
+                ImGui.BeginDisabled(busy);
+                ImGui.PushID("senderRole");
+                if (ImGui.BeginCombo(T("Твоя роль: ", "Your role: "), transferSenderRole.Name))
+                {
+                    foreach (var mod in discovered.Where(m => m.Directory == transferSourceDirectory))
+                        if (ImGui.Selectable(mod.EmoteName + "##self" + mod.Command))
+                        {
+                            try { transferSenderRole = CreateBookmark(mod, null); }
+                            catch (Exception ex) { TransferFailure(ex.Message); }
+                        }
+                    ImGui.EndCombo();
+                }
+                DrawTransferRoleOptions(transferSenderRole);
+                ImGui.PopID();
                 ImGui.Checkbox(T("Совместный танец — одна эмоция, 3 ялма между вами", "Shared dance — same emote, 3 yalms apart"), ref transferSharedDance);
                 if (transferSharedDance) transferReceiverRole = SnapshotBookmark(transferSenderRole);
                 else
@@ -405,8 +418,10 @@ public sealed partial class Plugin
                 }
                 DrawTransferRoleOptions();
                 }
+                ImGui.EndDisabled();
             }
-            ImGui.TextWrapped(T("После установки: ", "After installation: ") + TransferLaunch.Decode(transferLaunchDraft)!.Label);
+            ImGui.TextWrapped(T("После установки: ", "After installation: ") +
+                (transferReceiverRole?.Name ?? TransferLaunch.Decode(transferLaunchDraft)!.Label));
             if (ImGui.SmallButton(T("Без запуска", "Without playback"))) { transferLaunchDraft = ""; transferSenderRole = transferReceiverRole = null; }
         }
         ImGui.BeginDisabled(config.TransferNoticeVersion != 1 || transfers is null || busy || (transferManualPackage ? transferPath.Length == 0 : !transferMods.ContainsKey(transferSourceDirectory)) || (transferSenderRole is not null && (transferReceiverRole is null || (!transferSharedDance && OfferRole(transferSenderRole) == OfferRole(transferReceiverRole)))));

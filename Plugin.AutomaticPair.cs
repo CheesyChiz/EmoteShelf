@@ -30,6 +30,7 @@ public sealed partial class Plugin
         if (!LinkFresh || link?.Snapshot.State != "linked")
         { queuedTransferPair = null; lastAcceptedPair = null; return; }
         var proposal = link.Snapshot.Launch;
+        UpdateMissingModTransfer(proposal);
         if (pairSession is null && proposal is null && lastAcceptedPair is not null &&
             Environment.TickCount64 >= acceptedEmoteCheckAfter && !StillPlayingAcceptedEmote())
             lastAcceptedPair = null;

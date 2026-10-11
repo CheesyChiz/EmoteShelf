@@ -3,6 +3,21 @@ from links import LinkStore
 
 
 class LinkTests(unittest.TestCase):
+    def test_missing_mod_request_is_bound_to_incoming_waiting_offer(self):
+        invitation = self.invite()['invitation']
+        self.store.action(self.b, 'accept', invitation=invitation)
+        offer = dict(id='1'*64, family='2'*64, command='3'*64, role='4'*64)
+        self.store.action(self.a, 'propose', offer=offer)
+        with self.assertRaises(ValueError): self.store.action(self.a, 'request_mod', invitation=offer['id'])
+        with self.assertRaises(ValueError): self.store.action(self.b, 'request_mod', invitation='9'*64)
+        for _ in range(2): self.store.action(self.b, 'request_mod', invitation=offer['id'])
+        self.assertTrue(self.store.action(self.a)['launch']['missing_mod'])
+        self.assertEqual(self.store.action(self.a)['launch']['status'], 'waiting')
+        self.store.action(self.b, 'accept_launch', invitation=offer['id'])
+        with self.assertRaises(ValueError): self.store.action(self.b, 'request_mod', invitation=offer['id'])
+        self.store.action(self.a, 'cancel_launch', invitation=offer['id'])
+        with self.assertRaises(ValueError): self.store.action(self.b, 'request_mod', invitation=offer['id'])
+
     def test_dance_requires_both_clients_and_preserves_choices_on_restart(self):
         invitation = self.invite()['invitation']
         self.store.action(self.b, 'accept', invitation=invitation)

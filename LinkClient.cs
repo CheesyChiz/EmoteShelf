@@ -14,7 +14,7 @@ public sealed record LaunchOffer(
     [property: JsonPropertyName("role")] string Role,
     [property: JsonPropertyName("dance")] bool Dance = false,
     [property: JsonPropertyName("options")] Dictionary<string, List<string>>? Options = null);
-public sealed record LaunchInvitation(LaunchOffer Offer, bool Incoming, string Status, int Remaining, string Previous = "");
+public sealed record LaunchInvitation(LaunchOffer Offer, bool Incoming, string Status, int Remaining, string Previous = "", bool MissingMod = false);
 public sealed record LinkSnapshot(string State, string Partner, string Invitation, int Remaining, long ReceivedAt, string Error = "", LaunchInvitation? Launch = null, bool CurrentPeer = false);
 
 // Only immutable snapshots cross into the framework/UI thread.
@@ -108,7 +108,8 @@ public sealed class LinkClient : IDisposable
                     if (launchState is not ("waiting" or "accepted") || state != "linked") throw new InvalidOperationException("Invalid proposal state");
                     var previous = raw.TryGetProperty("previous", out var prior) ? prior.GetString() ?? "" : "";
                     if (previous.Length != 0 && (previous.Length != 64 || !previous.All(char.IsAsciiHexDigit))) throw new InvalidOperationException("Invalid restart");
-                    launch = new(offer, raw.GetProperty("incoming").GetBoolean(), launchState, raw.GetProperty("remaining").GetInt32(), previous);
+                    launch = new(offer, raw.GetProperty("incoming").GetBoolean(), launchState, raw.GetProperty("remaining").GetInt32(), previous,
+                        raw.TryGetProperty("missing_mod", out var missing) && missing.GetBoolean());
                 }
                 Volatile.Write(ref snapshot, new(state, partner, data.GetProperty("invitation").GetString() ?? "",
                     data.GetProperty("remaining").GetInt32(), Environment.TickCount64, error, launch,
