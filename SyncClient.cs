@@ -41,7 +41,21 @@ internal sealed class SyncClient : IDisposable
                 // Bounded relay requires a Content-Length, not chunked encoding.
                 await request.Content.LoadIntoBufferAsync();
                 using var response = await http.SendAsync(request, stop.Token);
-                response.EnsureSuccessStatusCode();
+                if (!response.IsSuccessStatusCode)
+                {
+                    var error = "sync_http_" + (int)response.StatusCode;
+                    try
+                    {
+                        var failure = await response.Content.ReadFromJsonAsync<JsonElement>(Json, stop.Token);
+                        var code = failure.GetProperty("error").GetString();
+                        if (code is { Length: < 80 } && code.StartsWith("sync_") &&
+                            code.All(c => char.IsAsciiLetterOrDigit(c) || c == '_')) error += ":" + code;
+                    }
+                    catch (Exception ex) when (ex is JsonException or KeyNotFoundException or InvalidOperationException) { }
+                    Volatile.Write(ref observation, new(null, 0, Environment.TickCount64, 0, error));
+                    await Task.Delay(500, stop.Token);
+                    continue;
+                }
                 var result = await response.Content.ReadFromJsonAsync<JsonElement>(Json, stop.Token);
                 var peer = result.GetProperty("peer").Deserialize<SyncFrame>(Json);
                 if (peer is not null && (peer.Attempt != Attempt || !SyncRules.ValidAssets(peer.Assets) || !SyncRules.ValidPhase(peer.Phase, peer.Duration)))

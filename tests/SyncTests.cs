@@ -21,6 +21,10 @@ internal static class SyncTests
             File.WriteAllText(Path.Combine(root, "group_001.json"), """{"Name":"Song","Options":[{"Name":"A","Files":{"sound/a.scd":"a.scd"}},{"Name":"B","Files":{"sound/b.scd":"b.scd"}}]}""");
             var paths = ResourceProof.Paths(root, new() { ["Song"] = ["A"] }, ["chara/a.pap"]);
             if (!paths.SequenceEqual(new[] { "chara/a.pap", "sound/a.scd", "sound/test.scd" })) throw new Exception("Selected resource manifest includes wrong role/options");
+            File.WriteAllText(Path.Combine(root, "meta.json"), """{"DefaultData":{"Files":{"sound/base.scd":"base.scd"}},"Groups":[{"Name":"V4","Options":[{"Name":"A","Files":{"sound/v4.scd":"v4.scd"}},{"Name":"B","Files":{"sound/unselected.scd":"other.scd"}}]}]}""");
+            var v4 = ResourceProof.Paths(root, new() { ["V4"] = ["A"] }, ["chara/a.pap"]);
+            if (!v4.Contains("sound/base.scd") || !v4.Contains("sound/v4.scd") || v4.Contains("sound/unselected.scd"))
+                throw new Exception("V4 resource manifest selections failed");
             var asset = Path.Combine(root, "a.pap"); File.WriteAllText(asset, "one");
             var first = ResourceProof.Hash(new() { ["chara/a.pap"] = asset });
             File.WriteAllText(asset, "two");

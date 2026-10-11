@@ -1167,18 +1167,15 @@ public sealed partial class Plugin : IDalamudPlugin
             }
             used += width;
         }
+        ImGui.EndDisabled();
         if (ImGui.Button(T("Передать мод…", "Send mod…"), new Vector2(Math.Min(available,
             Math.Max(width, ImGui.CalcTextSize(T("Передать мод…", "Send mod…")).X + ImGui.GetStyle().FramePadding.X * 2)), size.Y)))
         {
-            if (draft) PlayDraft(mod, false, transfer: true);
-            else
-            {
-                try { PrepareTransferLaunch(CreateBookmark(mod, null)); }
-                catch (Exception ex) { status = ex.Message; }
-            }
+            transferSourceDirectory = mod.Directory;
+            transferLaunchDraft = "";
+            transferSenderRole = transferReceiverRole = null;
+            selectTransfersTab = true;
         }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip(T("Передать мод и предложить запуск", "Send mod with playback offer"));
-        ImGui.EndDisabled();
     }
 
     private void PlayDraft(EmoteMod mod, bool add, bool pair = false, bool transfer = false)

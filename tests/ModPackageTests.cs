@@ -23,6 +23,7 @@ internal static class ModPackageTests
     internal static void Run()
     {
         ModPackage.Validate(Package());
+        ModPackage.Validate(Package("face.kdb"));
         foreach (var bad in new[] { "../evil.pap", "C:/evil.pap", "x:stream.pap", "CON.pap", "x./evil.pap", "run.dll", "run.ps1", "x\\..\\evil.tex", "a//b.tex" })
         {
             try { ModPackage.Validate(Package(bad)); throw new Exception("Unsafe package accepted: " + bad); }

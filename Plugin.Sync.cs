@@ -15,6 +15,9 @@ public sealed partial class Plugin
     private int phaseMismatchSamples;
     private double observedPhaseDrift = double.NaN;
     private string resourceState = "";
+    private string resourceError = "", lastResourceDiagnostic = "";
+    private long nextResourceDiagnostic;
+    private long nextLocalResourceCheck;
 
     private void StopPairSync()
     {
@@ -22,6 +25,9 @@ public sealed partial class Plugin
         resourcePaths = null; resourceHashes = peerHashes = null;
         localResources = []; checkingPeer = []; peerResourcesVerified = false;
         observedPhaseDrift = double.NaN; phaseMismatchSamples = 0;
+        resourceError = lastResourceDiagnostic = "";
+        nextResourceDiagnostic = nextResourceCheck = 0;
+        nextLocalResourceCheck = 0;
     }
     private Dictionary<string, string> ResolveResources(IEnumerable<string> paths, ushort actor)
     {
@@ -49,6 +55,13 @@ public sealed partial class Plugin
             resourceState = "waiting";
         }
         var remote = pairSync.Observation;
+        var detail = ResourceDiagnostic();
+        if (detail != lastResourceDiagnostic || Environment.TickCount64 >= nextResourceDiagnostic)
+        {
+            lastResourceDiagnostic = detail;
+            nextResourceDiagnostic = Environment.TickCount64 + 5000;
+            PairDebug("resource verification: " + detail, true);
+        }
         return localResources.Length > 0 && peerResourcesVerified && remote.Peer?.Verified == true &&
                Environment.TickCount64 - remote.Received < 2000 && remote.Age < 2;
     }
@@ -62,11 +75,13 @@ public sealed partial class Plugin
         { lastAcceptedPair = null; StopPairSync(); return; }
         try
         {
-            if (resourcePaths is { IsCompleted: true } pathsTask)
+            if (resourcePaths is { IsCompleted: true } pathsTask && now >= nextLocalResourceCheck)
             {
-                resourcePaths = null;
+                nextLocalResourceCheck = now + 1000;
                 var files = ResolveResources(FilterLocalResources(pathsTask.GetAwaiter().GetResult()), local.ObjectIndex);
                 if (files.Count == 0) throw new InvalidOperationException("resource_no_matching_model");
+                resourcePaths = null;
+                resourceError = "";
                 resourceHashes = Task.Run(() => ResourceProof.Hash(files));
             }
             if (resourceHashes is { IsCompleted: true } hashTask)
@@ -78,6 +93,7 @@ public sealed partial class Plugin
                 peerResourcesVerified = ResourceProof.Equal(peerTask.GetAwaiter().GetResult(), checkingPeer) &&
                     observation.Peer is { } current && ResourceProof.Equal(current.Assets, checkingPeer);
                 resourceState = peerResourcesVerified ? "verified" : "mismatch";
+                resourceError = peerResourcesVerified ? "" : "resource_hash_mismatch";
             }
             if (observation.Peer is { Assets.Length: > 0 } other && peerHashes is null && now >= nextResourceCheck && pairSession is not null)
             {
@@ -111,8 +127,27 @@ public sealed partial class Plugin
         {
             peerResourcesVerified = false; resourceState = "unavailable";
             pairSync.Set(localResources, false, 0, 0);
-            if (now >= nextResourceCheck) { nextResourceCheck = now + 1000; PairDebug("resource proof unavailable: " + ex.GetType().Name, true); }
+            resourceError = ex is InvalidOperationException or System.IO.InvalidDataException &&
+                ex.Message.StartsWith("resource_") ? ex.Message : "resource_" + ex.GetType().Name;
+            if (now >= nextResourceDiagnostic)
+            { nextResourceDiagnostic = now + 5000; PairDebug("resource proof unavailable: " + resourceError, true); }
         }
+    }
+    private string ResourceDiagnostic()
+    {
+        var remote = pairSync?.Observation;
+        return $"state={resourceState}; localAssets={localResources.Length}; peerAssets={remote?.Peer?.Assets.Length ?? 0}; " +
+            $"localVerified={peerResourcesVerified}; peerVerified={remote?.Peer?.Verified ?? false}; " +
+            $"transport={remote?.Error ?? "not_started"}; error={resourceError}";
+    }
+    private string ResourceExplanation()
+    {
+        var remote = pairSync?.Observation;
+        if (remote?.Error.Length > 0)
+            return T("Не удалось обменяться проверкой файлов с сервером.", "Resource verification exchange with the server failed.") + " " + remote.Error;
+        if (resourceError.Length > 0)
+            return T("Файлы анимации недоступны или не совпадают.", "Animation files are unavailable or do not match.") + " " + resourceError;
+        return T("Ожидаем подтверждение файлов от второго клиента.", "Waiting for file confirmation from the other client.");
     }
     private unsafe bool ReadLocalPhase(out double phase, out double duration)
     {

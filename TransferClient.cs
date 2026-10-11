@@ -90,6 +90,7 @@ internal sealed class TransferClient : IDisposable
             throw new InvalidOperationException("transfer_not_linked");
         using var request = new HttpRequestMessage(HttpMethod.Post, "v5/transfer") { Content = JsonContent.Create(message) };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", link.TransferCapability ?? throw new InvalidOperationException("transfer_not_linked"));
+        await request.Content.LoadIntoBufferAsync();
         using var response = await http.SendAsync(request, stop.Token);
         if (!response.IsSuccessStatusCode)
         {

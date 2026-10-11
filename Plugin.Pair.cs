@@ -360,9 +360,9 @@ public sealed partial class Plugin
                     if (!PairResourcesReady())
                     {
                         if (now > pairDeadline - 1500)
-                            throw new InvalidOperationException(T("Файлы партнёра не подтверждены. Дождитесь синхронизации Lightless и обновите Emote Shelf у обоих.", "Partner resources are not confirmed. Wait for Lightless synchronization and update Emote Shelf on both clients."));
+                            throw new InvalidOperationException(ResourceExplanation() + "\n" + ResourceDiagnostic());
                         pairConfirmUntil = now + 5000;
-                        pairMessage = T("Ожидаем совпадения файлов партнёра", "Waiting for matching partner files");
+                        pairMessage = ResourceExplanation();
                         return;
                     }
                     pairCheckpoint = "post_prepare_alignment";

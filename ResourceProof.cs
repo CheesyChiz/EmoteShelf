@@ -8,13 +8,19 @@ internal static class ResourceProof
     {
         var paths = new HashSet<string>(required, StringComparer.Ordinal);
         foreach (var file in Directory.EnumerateFiles(directory, "*.json", SearchOption.TopDirectoryOnly)
-                     .Where(f => Path.GetFileName(f) == "default_mod.json" || Path.GetFileName(f).StartsWith("group_")))
+                     .Where(f => Path.GetFileName(f) is "meta.json" or "default_mod.json" || Path.GetFileName(f).StartsWith("group_")))
         {
             if (new FileInfo(file).Length > 2*1024*1024) throw new InvalidDataException("resource_metadata_size");
             using var doc = JsonDocument.Parse(File.ReadAllText(file));
             var root = doc.RootElement;
-            if (Path.GetFileName(file) == "default_mod.json") Collect(root);
-            else if (root.TryGetProperty("Name", out var name) && options.TryGetValue(name.GetString() ?? "", out var selected) &&
+            if (Path.GetFileName(file) is "meta.json" or "default_mod.json") Collect(root);
+            if (root.TryGetProperty("Groups", out var groups) && groups.ValueKind == JsonValueKind.Array)
+                foreach (var group in groups.EnumerateArray()) CollectGroup(group);
+            else CollectGroup(root);
+        }
+        void CollectGroup(JsonElement root)
+        {
+            if (root.TryGetProperty("Name", out var name) && options.TryGetValue(name.GetString() ?? "", out var selected) &&
                      root.TryGetProperty("Options", out var choices))
                 foreach (var choice in choices.EnumerateArray())
                     if (choice.TryGetProperty("Name", out var choiceName) && selected.Contains(choiceName.GetString())) Collect(choice);

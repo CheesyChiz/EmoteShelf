@@ -12,6 +12,9 @@ internal static partial class Localization
         }
     }
     private const string Additional = """
+Resource verification exchange with the server failed.|サーバーとのファイル検証通信に失敗しました。|Der Austausch zur Dateiprüfung mit dem Server ist fehlgeschlagen.|Échec de l’échange de vérification des fichiers avec le serveur.
+Animation files are unavailable or do not match.|アニメーションファイルが利用できないか、一致しません。|Animationsdateien sind nicht verfügbar oder stimmen nicht überein.|Les fichiers d’animation sont indisponibles ou ne correspondent pas.
+Waiting for file confirmation from the other client.|相手クライアントからのファイル確認を待っています。|Warte auf die Dateibestätigung des anderen Clients.|En attente de confirmation des fichiers par l’autre client.
 Moved to {0} (Synastry). Use the active emote above.|{0}へ移行済み（Synastry）。上の有効なエモートを使用してください。|Nach {0} verschoben (Synastry). Verwende das aktive Emote oben.|Transféré vers {0} (Synastry). Utilisez l’emote active ci-dessus.
 Emote Shelf copy: {0}. The original emote is preserved.|Emote Shelfのコピー：{0}。元のエモートは保持されています。|Emote-Shelf-Kopie: {0}. Das ursprüngliche Emote bleibt erhalten.|Copie Emote Shelf : {0}. L’emote d’origine est conservée.
 Your partner needs to update Emote Shelf to 0.3.9.1 and reconnect.|相手はEmote Shelfを0.3.9.1に更新して再接続する必要があります。|Dein Partner muss Emote Shelf auf 0.3.9.1 aktualisieren und sich erneut verbinden.|Votre partenaire doit mettre Emote Shelf à jour vers 0.3.9.1 et se reconnecter.

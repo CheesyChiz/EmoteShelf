@@ -9,7 +9,7 @@ internal static class ModPackage
     internal const int MaxCompressed = 32 * 1024 * 1024;
     internal const int MaxExpanded = 128 * 1024 * 1024;
     private static readonly HashSet<string> Extensions = new(StringComparer.OrdinalIgnoreCase)
-    { ".json", ".mdl", ".mtrl", ".tex", ".atex", ".avfx", ".pap", ".tmb", ".scd", ".sklb", ".skp", ".eid", ".phyb", ".imc", ".eqp", ".eqdp", ".est", ".gmp", ".png", ".jpg", ".jpeg" };
+    { ".json", ".mdl", ".mtrl", ".tex", ".atex", ".avfx", ".pap", ".tmb", ".scd", ".sklb", ".skp", ".eid", ".phyb", ".imc", ".eqp", ".eqdp", ".est", ".gmp", ".kdb", ".png", ".jpg", ".jpeg" };
 
     internal static string SafePath(string path)
     {
