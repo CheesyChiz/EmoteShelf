@@ -65,6 +65,26 @@ var testRoot = Path.Combine(Path.GetTempPath(), "EmoteShelfPoseTests-" + Guid.Ne
 try
 {
     var modRoot = Path.Combine(testRoot, "GroundSitFixture");
+    var specialRoot = Path.Combine(testRoot, "SpecialFixture");
+    Directory.CreateDirectory(specialRoot);
+    File.WriteAllText(Path.Combine(specialRoot, "meta.json"), """
+        {"Description":"Replaces /songbird","DefaultData":{"Files":{
+        "chara/human/c0101/animation/a0001/bt_common/emote_sp/sp05_loop.pap":"loop.pap",
+        "chara/human/c0101/animation/a0001/bt_common/emote_sp/sp05_start.pap":"loop.pap",
+        "chara/human/c0101/animation/a0001/bt_common/emote_sp/sp05_start_fate.pap":"loop.pap"}},
+        "Groups":[{"Name":"Style","Type":"Single","Options":[{"Name":"Default","Files":{
+        "chara/human/c0101/animation/a0001/bt_common/emote_sp/sp05_loop.pap":"variant.pap"}}]}]}
+        """);
+    var special = ModScanner.Scan(testRoot, new Dictionary<string, string> { ["SpecialFixture"] = "Special" },
+        new EmoteCatalog(), _ => []).Single();
+    if (special.Command != "/songbird" || special.Paths.Length != 3 || special.BasePaths.Length != 3 ||
+        special.Variants.Single().Paths.Length != 1 || special.Variants.Single().Files.Count != 1)
+        throw new Exception("Special emote paths or options were dropped before command inference.");
+    if (ModScanner.IsEmotePath("chara/human/battle/attack.pap") ||
+        ModScanner.IsEmotePath("chara/human/emote_spurious/attack.pap") ||
+        ModScanner.IsEmotePath("chara/human/emote_sp/sp05.tex") ||
+        !ModScanner.IsEmotePath(@"chara\human\emote_sp\SP05_LOOP.PAP"))
+        throw new Exception("Emote path namespace filtering failed.");
     Directory.CreateDirectory(modRoot);
     File.WriteAllText(Path.Combine(modRoot, "meta.json"), """
         {

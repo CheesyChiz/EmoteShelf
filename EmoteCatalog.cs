@@ -65,7 +65,11 @@ public sealed class EmoteCatalog
 
     public (string Name, string Command, uint Icon)? Resolve(string gamePath)
     {
+        // Preserve the timeline namespace, including special emotes such as Songbird.
+        var normalized = gamePath.Replace('\\', '/');
+        var parent = Path.GetFileName(Path.GetDirectoryName(normalized));
         var file = Path.GetFileNameWithoutExtension(gamePath).ToLowerInvariant();
+        if (timelines.TryGetValue(parent + "/" + file, out var qualified)) return qualified;
         if (timelines.TryGetValue(file, out var exact)) return exact;
         if (timelines.TryGetValue("emote/" + file, out exact)) return exact;
         // A .pap often adds a phase suffix to the ActionTimeline key.

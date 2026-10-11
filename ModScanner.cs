@@ -185,7 +185,7 @@ public static partial class ModScanner
                     foreach (var file in prop.Value.EnumerateObject())
                     {
                         var path = file.Name.Replace('\\', '/').ToLowerInvariant();
-                        if (path.Contains("/emote/") && path.EndsWith(".pap")) paths.Add(path);
+                        if (IsEmotePath(path)) paths.Add(path);
                     }
                 }
                 Collect(prop.Value, paths);
@@ -205,9 +205,17 @@ public static partial class ModScanner
             foreach (var file in files.EnumerateObject())
             {
                 var path = file.Name.Replace('\\', '/').ToLowerInvariant();
-                if (path.Contains("/emote/") && path.EndsWith(".pap")) paths.Add(path);
+                if (IsEmotePath(path)) paths.Add(path);
             }
         }
+    }
+
+    internal static bool IsEmotePath(string path)
+    {
+        var normalized = path.Replace('\\', '/');
+        return normalized.EndsWith(".pap", StringComparison.OrdinalIgnoreCase) &&
+            (normalized.Contains("/emote/", StringComparison.OrdinalIgnoreCase) ||
+             normalized.Contains("/emote_sp/", StringComparison.OrdinalIgnoreCase));
     }
 
     private static void CollectVariants(JsonElement root, List<EmoteVariant> variants)
