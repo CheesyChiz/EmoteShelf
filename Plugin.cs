@@ -1173,6 +1173,7 @@ public sealed partial class Plugin : IDalamudPlugin
             Math.Max(width, ImGui.CalcTextSize(T("Передать мод…", "Send mod…")).X + ImGui.GetStyle().FramePadding.X * 2)), size.Y)))
         {
             transferSourceDirectory = mod.Directory;
+            transferManualPackage = false;
             transferLaunchDraft = "";
             transferSenderRole = transferReceiverRole = null;
             selectTransfersTab = true;

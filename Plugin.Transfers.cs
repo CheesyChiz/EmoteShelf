@@ -11,6 +11,10 @@ public sealed partial class Plugin
     private bool selectTransfersTab;
     private string transferLaunchDraft = "";
     private string transferSourceDirectory = "";
+    private string transferModSearch = "";
+    private Dictionary<string, string> transferMods = [];
+    private long transferModsRefresh;
+    private bool transferManualPackage;
     private Bookmark? transferSenderRole, transferReceiverRole;
     private TransferLaunch? acceptedTransferLaunch;
     private string transferPartner = "", transferPath = "", transferMessage = "", lastTransferError = "";
@@ -214,7 +218,40 @@ public sealed partial class Plugin
 
     private void DrawTransfers()
     {
-        if (transferSourceDirectory.Length == 0)
+        if (Environment.TickCount64 >= transferModsRefresh)
+        {
+            transferModsRefresh = Environment.TickCount64 + 5000;
+            try { transferMods = getMods.Invoke(); }
+            catch { transferMods = []; }
+        }
+        var busy = transfers?.Offer is not null || transfers?.ProposalPending == true || transferSending is not null;
+        ImGui.BeginDisabled(busy);
+        if (ImGui.Checkbox(T("Использовать готовый PMP", "Use an exported PMP"), ref transferManualPackage))
+        {
+            transferLaunchDraft = ""; transferSenderRole = transferReceiverRole = null;
+            queuedTransferPair = null;
+        }
+        if (!transferManualPackage)
+        {
+            var selectedName = transferMods.GetValueOrDefault(transferSourceDirectory);
+            if (ImGui.BeginCombo(T("Мод для передачи", "Mod to send"), selectedName ?? "—"))
+            {
+                ImGui.InputText(T("Поиск модов", "Search mods"), ref transferModSearch, 200);
+                foreach (var mod in transferMods.OrderBy(m => m.Value, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (!mod.Value.Contains(transferModSearch, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (ImGui.Selectable(mod.Value + "##send" + mod.Key, mod.Key == transferSourceDirectory))
+                    {
+                        transferSourceDirectory = mod.Key;
+                        transferLaunchDraft = ""; transferSenderRole = transferReceiverRole = null;
+                        queuedTransferPair = null; transferMessage = "";
+                    }
+                }
+                ImGui.EndCombo();
+            }
+        }
+        ImGui.EndDisabled();
+        if (transferManualPackage)
         ImGui.TextWrapped(T("Экспортируй нужный мод в PMP через Penumbra и укажи файл ниже. До 32 МиБ; сервер удаляет пакет через 10 минут или при разрыве пары. Это передача копии мода, не синхронизация Lightless.",
             "Export the mod as a PMP in Penumbra and select its path below. Up to 32 MiB; the server removes it after 10 minutes or unlinking. This sends a copy, not Lightless synchronization."));
         if (config.TransferNoticeVersion != 1)
@@ -226,7 +263,7 @@ public sealed partial class Plugin
             if (ImGui.Button(T("Подтвердить один раз", "Confirm once"))) { config.TransferNoticeVersion = 1; Save(); }
             ImGui.EndDisabled();
         }
-        if (transferSourceDirectory.Length == 0) ImGui.InputText(T("Путь к PMP", "PMP path"), ref transferPath, 1024);
+        if (transferManualPackage) ImGui.InputText(T("Путь к PMP", "PMP path"), ref transferPath, 1024);
         else ImGui.TextWrapped(T("Пакет выбранного мода будет собран автоматически. Ручной экспорт не нужен.", "The selected mod will be packaged automatically. No manual export is needed."));
         if (transferLaunchDraft.Length > 0)
         {
@@ -250,7 +287,7 @@ public sealed partial class Plugin
             ImGui.TextWrapped(T("После установки: ", "After installation: ") + TransferLaunch.Decode(transferLaunchDraft)!.Label);
             if (ImGui.SmallButton(T("Без запуска", "Without playback"))) { transferLaunchDraft = ""; transferSenderRole = transferReceiverRole = null; }
         }
-        ImGui.BeginDisabled(config.TransferNoticeVersion != 1 || transfers is null || transfers.Offer is not null || transfers.ProposalPending || transferSending is not null || (transferPath.Length == 0 && transferSourceDirectory.Length == 0) || (transferSenderRole is not null && (transferReceiverRole is null || OfferRole(transferSenderRole) == OfferRole(transferReceiverRole))));
+        ImGui.BeginDisabled(config.TransferNoticeVersion != 1 || transfers is null || busy || (transferManualPackage ? transferPath.Length == 0 : !transferMods.ContainsKey(transferSourceDirectory)) || (transferSenderRole is not null && (transferReceiverRole is null || OfferRole(transferSenderRole) == OfferRole(transferReceiverRole))));
         if (ImGui.Button(T("Предложить мод партнёру", "Offer mod to partner")))
         {
             var client = transfers!; var path = transferPath.Trim().Trim('"'); var launch = transferLaunchDraft;
@@ -264,11 +301,12 @@ public sealed partial class Plugin
                 queuedTransferPair = new(SnapshotBookmark(sender), id, family, transferPartner,
                     ClientState.TerritoryType, Environment.TickCount64 + 660000);
             }
-            if (transferSourceDirectory.Length == 0) transferSending = Task.Run(() => client.Propose(path, launch));
+            if (transferManualPackage) transferSending = Task.Run(() => client.Propose(path, launch));
             else
             {
                 var root = getRoot.Invoke(); var directory = transferSourceDirectory;
-                transferSending = Task.Run(async () => await client.ProposePackage(ModPackage.PackMod(root, directory), "EmoteShelf.pmp", launch));
+                var packageName = ModPackage.DisplayFileName(transferMods[directory]);
+                transferSending = Task.Run(async () => await client.ProposePackage(ModPackage.PackMod(root, directory), packageName, launch));
             }
         }
         ImGui.EndDisabled();
@@ -370,6 +408,7 @@ public sealed partial class Plugin
             if (other is not null) transferReceiverRole = CreateBookmark(other, null);
         }
         transferSourceDirectory = bookmark.ModDirectory;
+        transferManualPackage = false;
         transferLaunchDraft = new TransferLaunch(bookmark.Name[..Math.Min(200, bookmark.Name.Length)], bookmark.Command,
             bookmark.PoseIndex, bookmark.SavedOptions?.ToDictionary(p => p.Key, p => p.Value.ToList()) ?? []).Encode();
         selectTransfersTab = true;

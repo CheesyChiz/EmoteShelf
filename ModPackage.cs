@@ -8,6 +8,13 @@ internal static class ModPackage
 {
     internal const int MaxCompressed = 32 * 1024 * 1024;
     internal const int MaxExpanded = 128 * 1024 * 1024;
+    internal static string DisplayFileName(string name)
+    {
+        var clean = new string(name.Where(c => !char.IsControl(c) && !"/\\:*?\"<>|".Contains(c)).ToArray()).Trim();
+        if (clean.Length == 0) clean = "Mod";
+        if (clean.Length > 96) clean = clean[..(char.IsHighSurrogate(clean[95]) ? 95 : 96)];
+        return clean + ".pmp";
+    }
     private static readonly HashSet<string> Extensions = new(StringComparer.OrdinalIgnoreCase)
     { ".json", ".mdl", ".mtrl", ".tex", ".atex", ".avfx", ".pap", ".tmb", ".scd", ".sklb", ".skp", ".eid", ".phyb", ".imc", ".eqp", ".eqdp", ".est", ".gmp", ".kdb", ".png", ".jpg", ".jpeg" };
 

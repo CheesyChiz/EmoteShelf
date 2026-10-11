@@ -6,6 +6,11 @@ internal static class ModPackageTests
 {
     internal static byte[] Package(string file = "anim.pap", string? target = null, int attributes = 0)
     {
+        var label = ModPackage.DisplayFileName("PM ～ BABYMONSTER - ‘DRIP’");
+        if (!label.Contains("BABYMONSTER") || !label.EndsWith(".pmp") ||
+            ModPackage.DisplayFileName(new string('x', 150)).Length > 100 ||
+            ModPackage.DisplayFileName("bad\n/name").Contains('\n'))
+            throw new Exception("Transfer package label invalid");
         using var stream = new MemoryStream();
         using (var zip = new ZipArchive(stream, ZipArchiveMode.Create, true))
         {

@@ -12,6 +12,9 @@ internal static partial class Localization
         }
     }
     private const string Additional = """
+Use an exported PMP|エクスポート済みPMPを使用|Exportierte PMP verwenden|Utiliser un PMP exporté
+Mod to send|送信するMOD|Zu sendende Mod|Mod à envoyer
+Search mods|MODを検索|Mods suchen|Rechercher des mods
 The relay connection was interrupted. The plugin retries up to three times; if it still fails, send the mod again.|中継サーバーとの接続が中断されました。最大3回再試行します。それでも失敗する場合はMODを再送してください。|Die Verbindung zum Relay wurde unterbrochen. Das Plugin versucht es bis zu dreimal erneut. Bei erneutem Fehlschlag sende die Mod noch einmal.|La connexion au relais a été interrompue. Le plugin réessaie jusqu’à trois fois. Si l’échec persiste, renvoyez le mod.
 Resource verification exchange with the server failed.|サーバーとのファイル検証通信に失敗しました。|Der Austausch zur Dateiprüfung mit dem Server ist fehlgeschlagen.|Échec de l’échange de vérification des fichiers avec le serveur.
 Animation files are unavailable or do not match.|アニメーションファイルが利用できないか、一致しません。|Animationsdateien sind nicht verfügbar oder stimmen nicht überein.|Les fichiers d’animation sont indisponibles ou ne correspondent pas.
