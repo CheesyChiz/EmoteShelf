@@ -35,6 +35,23 @@ internal static class ModPackageTests
         try
         {
             Directory.CreateDirectory(root);
+            var source = Path.Combine(root, "Source");
+            Directory.CreateDirectory(source);
+            File.WriteAllText(Path.Combine(source, "meta.json"), """
+                {"Name":"All variants","DefaultData":{"Files":{"chara/base.pap":"base.pap"}},
+                "Groups":[{"Name":"Choice","Type":"Single","DefaultSettings":0,"Options":[
+                {"Name":"A","Files":{"chara/anim.pap":"a.pap"}},
+                {"Name":"B","Files":{"chara/anim.pap":"b.pap","chara/face.kdb":"face.kdb"}}]}]}
+                """);
+            foreach (var name in new[] { "base.pap", "a.pap", "b.pap", "face.kdb", "unrelated.exe" })
+                File.WriteAllText(Path.Combine(source, name), name);
+            var whole = ModPackage.PackMod(root, "Source");
+            using (var zip = new ZipArchive(new MemoryStream(whole)))
+            {
+                if (!zip.Entries.Select(e => e.FullName).Order().SequenceEqual(
+                    new[] { "meta.json", "base.pap", "a.pap", "b.pap", "face.kdb" }.Order()))
+                    throw new Exception("Whole-mod packaging dropped an unselected option or included an unrelated file");
+            }
             var first = ModPackage.ExtractNew(Package(), root);
             var second = ModPackage.ExtractNew(Package(), root);
             if (first == second || !File.Exists(Path.Combine(root, first, "anim.pap"))) throw new Exception("Import isolation failed");

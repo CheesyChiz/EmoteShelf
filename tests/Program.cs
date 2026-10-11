@@ -2,6 +2,29 @@ using EmoteShelf;
 
 try
 {
+if (args.Length == 2 && args[0] == "--carrier-check")
+{
+    var paths = CarrierConversion.SourcePaths(Path.GetFullPath(args[1]));
+    Console.WriteLine($"Carrier source paths found: {paths.Length}");
+    if (paths.Length == 0) throw new Exception("Installed animation mod has no carrier source paths");
+    return;
+}
+if (args.Length == 2 && args[0] == "--package-check")
+{
+    var source = Path.GetFullPath(args[1]);
+    var packed = ModPackage.PackMod(Path.GetDirectoryName(source)!, Path.GetFileName(source));
+    ModPackage.Validate(packed);
+    using var archive = new System.IO.Compression.ZipArchive(new MemoryStream(packed));
+    foreach (var entry in archive.Entries)
+    {
+        using var original = File.OpenRead(Path.Combine(source, entry.FullName));
+        using var copy = entry.Open();
+        if (!System.Security.Cryptography.SHA256.HashData(original).SequenceEqual(System.Security.Cryptography.SHA256.HashData(copy)))
+            throw new Exception("Packaged file differs from source: " + entry.FullName);
+    }
+    Console.WriteLine($"Installed mod package verified: files={archive.Entries.Count}; KDB={archive.Entries.Count(e => e.FullName.EndsWith(".kdb"))}; MiB={packed.Length / 1048576.0:F2}; every entry matches source; no upload or import.");
+    return;
+}
 LocalizationTests.Run();
 SoundRestartTests.Run();
 CarrierTests.Run();

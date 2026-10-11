@@ -26,8 +26,20 @@ def validate(data):
     if 'context' in data:
         context = data['context']
         flags = {'Anchor', 'AlignStarted', 'PreparationStarted', 'Preparing', 'Ready'}
-        if not isinstance(context, dict) or set(context) != flags | {'PairState', 'StableFrames'}:
+        resource_fields = {'ResourceStatus', 'LocalAssets', 'PeerAssets', 'LocalVerified', 'PeerVerified', 'SyncHttpStatus'}
+        base_fields = flags | {'PairState', 'StableFrames'}
+        if not isinstance(context, dict) or set(context) not in (base_fields, base_fields | resource_fields):
             raise ValueError('context schema')
+        if 'ResourceStatus' in context:
+            if context['ResourceStatus'] not in {'none', 'transport', 'mismatch', 'unavailable', 'local_pending', 'peer_missing', 'peer_pending', 'verified'}:
+                raise ValueError('resource status')
+            for key in ('LocalAssets', 'PeerAssets'):
+                if type(context[key]) is not int or not 0 <= context[key] <= 128:
+                    raise ValueError('resource count')
+            if any(type(context[key]) is not bool for key in ('LocalVerified', 'PeerVerified')):
+                raise ValueError('resource flags')
+            if type(context['SyncHttpStatus']) is not int or not (context['SyncHttpStatus'] == 0 or 100 <= context['SyncHttpStatus'] <= 599):
+                raise ValueError('resource http')
         if context['PairState'] not in {'none', 'connecting', 'waiting', 'paired', 'scheduled', 'error'}:
             raise ValueError('pair state')
         if any(type(context[key]) is not bool for key in flags):

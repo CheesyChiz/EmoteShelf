@@ -50,6 +50,28 @@ internal static class CarrierTests
             if (!File.ReadAllBytes(Path.Combine(original, "original.pap")).SequenceEqual(pap) || File.ReadAllText(Path.Combine(original, "default_mod.json")) != manifest)
                 throw new Exception("Carrier modified the original.");
             var count = Directory.GetDirectories(root).Length;
+            var v4 = Path.Combine(root, "V4");
+            Directory.CreateDirectory(v4);
+            var special = sourcePath.Replace("/emote/", "/emote_sp/");
+            File.WriteAllBytes(Path.Combine(v4, "original.pap"), pap);
+            var v4meta = new JsonObject { ["Name"] = "V4", ["Identifier"] = Guid.NewGuid().ToString(),
+                ["DefaultData"] = new JsonObject { ["Files"] = new JsonObject { [special] = "original.pap" } },
+                ["Groups"] = new JsonArray(new JsonObject { ["Name"] = "Style", ["Type"] = "Single",
+                    ["Options"] = new JsonArray(new JsonObject { ["Name"] = "A", ["Files"] = new JsonObject { [special] = "original.pap" } }) }) };
+            File.WriteAllText(Path.Combine(v4, "meta.json"), v4meta.ToJsonString());
+            if (!CarrierConversion.SourcePaths(v4).Contains(special) ||
+                CarrierConversion.TargetPath(special, new Dictionary<int,string>{{1,"emote_sp/source_loop"}},
+                    new Dictionary<int,string>{{1,"emote/target_loop"}}) != targetPath)
+                throw new Exception("V4 special-emote source discovery failed");
+            var v4copy = CarrierConversion.Create(root, "V4", "/dance", [new(special, targetPath, ["target_loop"])]);
+            var rewritten = JsonNode.Parse(File.ReadAllText(Path.Combine(root, v4copy, "meta.json")))!;
+            if (rewritten["Identifier"] is not null || rewritten["DefaultData"]!["Files"]![targetPath] is null ||
+                rewritten["Groups"]![0]!["Options"]![0]!["Files"]![targetPath] is null)
+                throw new Exception("V4 rewritten mappings or new identity lost");
+            var imported = ModPackage.ExtractNew(ModPackage.PackMod(root, "V4"), root);
+            if (JsonNode.Parse(File.ReadAllText(Path.Combine(root, imported, "meta.json")))!["Identifier"] is not null)
+                throw new Exception("Received mod retained sender identity");
+            count = Directory.GetDirectories(root).Length;
             Reject(() => CarrierConversion.Create(root, "..", "/dance", [redirect]));
             File.WriteAllBytes(Path.Combine(original, "original.pap"), [0, 1, 2]);
             Reject(() => CarrierConversion.Create(root, "Original", "/dance", [redirect]));

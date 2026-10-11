@@ -14,6 +14,8 @@ internal static class TransferClientTests
         internal const string Id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancel)
         {
+            if (request.RequestUri!.AbsolutePath == "/v5/transfer" && request.Content!.Headers.ContentLength is not > 0)
+                throw new Exception("Transfer request is missing Content-Length before serialization");
             using var doc = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancel));
             var data = doc.RootElement;
             object response;

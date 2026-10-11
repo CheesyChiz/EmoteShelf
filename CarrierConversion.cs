@@ -14,7 +14,7 @@ internal static class CarrierConversion
     internal static string? TargetPath(string path, IReadOnlyDictionary<int, string> source, IReadOnlyDictionary<int, string> target)
     {
         var normalized = path.Replace('\\', '/').ToLowerInvariant();
-        if (!normalized.StartsWith("chara/") || !normalized.Contains("/emote/") || !normalized.EndsWith(".pap")) return null;
+        if (!normalized.StartsWith("chara/") || !ModScanner.IsEmotePath(normalized)) return null;
         foreach (var (slot, key) in source.OrderByDescending(p => p.Value.Length))
         {
             var suffix = "/" + key + ".pap";
@@ -39,7 +39,7 @@ internal static class CarrierConversion
         return paths.ToArray();
     }
 
-    private static IEnumerable<string> Manifests(string root) => new[] { Path.Combine(root, "default_mod.json") }
+    private static IEnumerable<string> Manifests(string root) => new[] { Path.Combine(root, "meta.json"), Path.Combine(root, "default_mod.json") }
         .Concat(Directory.EnumerateFiles(root, "group_*.json", SearchOption.TopDirectoryOnly)).Where(File.Exists);
 
     private static IEnumerable<JsonObject> Maps(JsonNode? node)
@@ -125,8 +125,10 @@ internal static class CarrierConversion
             outputs[name] = JsonSerializer.SerializeToUtf8Bytes(root);
         }
         if (count == 0) throw new InvalidDataException("carrier_no_files");
-        var meta = ReadJson("meta.json").AsObject();
-        meta.Remove("Id"); meta.Remove("ModId");
+        // Keep rewritten v4 mappings rather than rereading the original manifest.
+        var meta = JsonNode.Parse(outputs["meta.json"])!.AsObject();
+        foreach (var key in meta.Select(p => p.Key).Where(k => k.Equals("Id", StringComparison.OrdinalIgnoreCase) ||
+                     k.Equals("ModId", StringComparison.OrdinalIgnoreCase) || k.Equals("Identifier", StringComparison.OrdinalIgnoreCase)).ToArray()) meta.Remove(key);
         meta["Name"] = "[ES Carrier " + command + "] " + meta["Name"]?.GetValue<string>();
         meta["Description"] = (meta["Description"]?.GetValue<string>() ?? "") + "\nIndependent carrier snapshot created by Emote Shelf. Original mod unchanged. Source: " + sourceDirectory;
         outputs["meta.json"] = JsonSerializer.SerializeToUtf8Bytes(meta);

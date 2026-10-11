@@ -75,17 +75,21 @@ public sealed partial class Plugin
         { lastAcceptedPair = null; StopPairSync(); return; }
         try
         {
-            if (resourcePaths is { IsCompleted: true } pathsTask && now >= nextLocalResourceCheck)
+            if (resourceHashes is null && resourcePaths is { IsCompleted: true } pathsTask && now >= nextLocalResourceCheck)
             {
                 nextLocalResourceCheck = now + 1000;
                 var files = ResolveResources(FilterLocalResources(pathsTask.GetAwaiter().GetResult()), local.ObjectIndex);
                 if (files.Count == 0) throw new InvalidOperationException("resource_no_matching_model");
-                resourcePaths = null;
                 resourceError = "";
                 resourceHashes = Task.Run(() => ResourceProof.Hash(files));
             }
             if (resourceHashes is { IsCompleted: true } hashTask)
-            { resourceHashes = null; localResources = hashTask.GetAwaiter().GetResult(); }
+            {
+                resourceHashes = null;
+                localResources = hashTask.GetAwaiter().GetResult();
+                resourcePaths = null;
+                resourceError = "";
+            }
             var observation = pairSync.Observation;
             if (peerHashes is { IsCompleted: true } peerTask)
             {
@@ -132,6 +136,22 @@ public sealed partial class Plugin
             if (now >= nextResourceDiagnostic)
             { nextResourceDiagnostic = now + 5000; PairDebug("resource proof unavailable: " + resourceError, true); }
         }
+    }
+    private int ResourceHttpStatus()
+    {
+        var error = pairSync?.Observation.Error ?? "";
+        return error.StartsWith("sync_http_") && error.Length >= 13 &&
+            int.TryParse(error.AsSpan(10, 3), out var code) && code is >= 100 and <= 599 ? code : 0;
+    }
+    private string ResourceReportStatus()
+    {
+        if (pairSync is null) return "none";
+        if (pairSync.Observation.Error.Length > 0) return "transport";
+        if (resourceError == "resource_hash_mismatch") return "mismatch";
+        if (resourceError.Length > 0) return "unavailable";
+        if (localResources.Length == 0) return "local_pending";
+        if (pairSync.Observation.Peer is null) return "peer_missing";
+        return peerResourcesVerified && pairSync.Observation.Peer.Verified ? "verified" : "peer_pending";
     }
     private string ResourceDiagnostic()
     {

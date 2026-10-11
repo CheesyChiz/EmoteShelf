@@ -58,7 +58,15 @@ public sealed partial class Plugin
             local is not null && peer is not null ? Vector3.Distance(local.Position, peer.Position) : null,
             local is not null && peer is not null ? PairRules.AngleDistance(local.Rotation, peer.Rotation) : null,
             new ReportContext(pairSession?.Snapshot.State ?? "none", pairSession?.Snapshot.Anchor ?? false,
-                pairAlignStarted, pairStartedPreparation, pairPreparing, pairReadySent, Math.Clamp(pairStableFrames, 0, 1000)));
+                pairAlignStarted, pairStartedPreparation, pairPreparing, pairReadySent, Math.Clamp(pairStableFrames, 0, 1000))
+            {
+                ResourceStatus = ResourceReportStatus(),
+                LocalAssets = Math.Clamp(localResources.Length, 0, 128),
+                PeerAssets = Math.Clamp(pairSync?.Observation.Peer?.Assets.Length ?? 0, 0, 128),
+                LocalVerified = peerResourcesVerified,
+                PeerVerified = pairSync?.Observation.Peer?.Verified ?? false,
+                SyncHttpStatus = ResourceHttpStatus(),
+            });
     }
     private void DrawReportSettings()
     {

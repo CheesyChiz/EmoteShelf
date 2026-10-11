@@ -7,7 +7,15 @@ using System.Threading.Channels;
 namespace EmoteShelf;
 
 internal sealed record ReportContext(string PairState, bool Anchor, bool AlignStarted, bool PreparationStarted,
-    bool Preparing, bool Ready, int StableFrames);
+    bool Preparing, bool Ready, int StableFrames)
+{
+    public string ResourceStatus { get; init; } = "none";
+    public int LocalAssets { get; init; }
+    public int PeerAssets { get; init; }
+    public bool LocalVerified { get; init; }
+    public bool PeerVerified { get; init; }
+    public int SyncHttpStatus { get; init; }
+}
 
 // Closed metadata only. Plugin gates Send behind a versioned first-use disclosure.
 internal sealed class ErrorReports : IDisposable

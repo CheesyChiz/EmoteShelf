@@ -225,12 +225,12 @@ public sealed partial class Plugin
 
     private void CancelPair(string? reason = null, bool failure = true)
     {
-        StopPairSync();
         CancelCarrierPlayback();
         RestoreOffset();
         if (pairSession is not null && reason is not null && failure)
             ReportPairError(pairAlignStarted && pairAlignment?.Error.Length > 0 ? "alignment_failed" : "launch_cancelled");
         if (pairSession is not null) LogPairDiagnostics(reason ?? "Local cancellation");
+        StopPairSync();
         if (reason is not null && failure)
         {
             // Keep the actionable explanation visible until dismissed, even after disconnect.

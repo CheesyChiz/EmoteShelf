@@ -1176,6 +1176,17 @@ public sealed partial class Plugin : IDalamudPlugin
             transferSenderRole = transferReceiverRole = null;
             selectTransfersTab = true;
         }
+        ImGui.BeginDisabled(draft && !draftOptions.ContainsKey(mod.Directory));
+        if (ImGui.Button(T("Передать мод и предложить запуск", "Send mod with playback offer")))
+        {
+            if (draft) PlayDraft(mod, false, transfer: true);
+            else
+            {
+                try { PrepareTransferLaunch(CreateBookmark(mod, null)); }
+                catch (Exception ex) { status = ex.Message; }
+            }
+        }
+        ImGui.EndDisabled();
     }
 
     private void PlayDraft(EmoteMod mod, bool add, bool pair = false, bool transfer = false)

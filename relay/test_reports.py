@@ -42,6 +42,14 @@ class ReportTests(unittest.TestCase):
             with self.assertRaises((ValueError, TypeError)):
                 validate(dict(self.data, **change))
 
+    def test_resource_context(self):
+        context = dict(PairState='paired', Anchor=False, AlignStarted=True, PreparationStarted=True,
+                       Preparing=False, Ready=False, StableFrames=3, ResourceStatus='transport',
+                       LocalAssets=12, PeerAssets=0, LocalVerified=False, PeerVerified=False, SyncHttpStatus=400)
+        self.assertEqual(json.loads(validate(dict(self.data, context=context)))['context'], context)
+        for change in (dict(ResourceStatus='private path'), dict(LocalAssets=129), dict(PeerVerified=1), dict(SyncHttpStatus=999)):
+            with self.assertRaises(ValueError): validate(dict(self.data, context=dict(context, **change)))
+
     def test_disk_excludes_ip(self):
         self.store.add(self.data, 'private-ip-marker')
         with self.store.connect() as db:
