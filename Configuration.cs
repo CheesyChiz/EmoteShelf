@@ -33,6 +33,7 @@ public sealed class Configuration : IPluginConfiguration
     public float PairNoticeY = -1;
     public HashSet<string> ClosedFolders = new(StringComparer.OrdinalIgnoreCase);
     public string Language = "";
+    public string LastPmpDirectory = "";
 }
 
 [Serializable]

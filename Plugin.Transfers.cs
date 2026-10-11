@@ -15,6 +15,7 @@ public sealed partial class Plugin
     private Dictionary<string, string> transferMods = [];
     private long transferModsRefresh;
     private bool transferManualPackage;
+    private readonly Dalamud.Interface.ImGuiFileDialog.FileDialogManager transferFileDialog = new();
     private Bookmark? transferSenderRole, transferReceiverRole;
     private bool transferSharedDance;
     private TransferLaunch? acceptedTransferLaunch;
@@ -319,7 +320,7 @@ public sealed partial class Plugin
         }
         var busy = transfers?.Offer is not null || transfers?.ProposalPending == true || transferSending is not null;
         ImGui.BeginDisabled(busy);
-        if (ImGui.Checkbox(T("Использовать готовый PMP", "Use an exported PMP"), ref transferManualPackage))
+        if (ImGui.Checkbox(T("Выбрать готовый PMP-файл", "Use a local PMP file"), ref transferManualPackage))
         {
             transferLaunchDraft = ""; transferSenderRole = transferReceiverRole = null;
             queuedTransferPair = null;
@@ -356,7 +357,30 @@ public sealed partial class Plugin
             if (ImGui.Button(T("Подтвердить один раз", "Confirm once"))) { config.TransferNoticeVersion = 1; Save(); }
             ImGui.EndDisabled();
         }
-        if (transferManualPackage) ImGui.InputText(T("Путь к PMP", "PMP path"), ref transferPath, 1024);
+        if (transferManualPackage)
+        {
+            ImGui.BeginDisabled(busy);
+            if (ImGui.Button(T("Обзор…", "Browse…")))
+            {
+                var start = config.LastPmpDirectory;
+                if (!Directory.Exists(start)) start = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+                if (!Directory.Exists(start)) start = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+                transferFileDialog.OpenFileDialog(T("Выбрать архив PMP", "Select PMP archive"), ".pmp", (ok, paths) =>
+                {
+                    if (!ok || paths.Count != 1 || transfers?.Offer is not null || transfers?.ProposalPending == true || transferSending is not null) return;
+                    var path = paths[0];
+                    if (!File.Exists(path) || !string.Equals(Path.GetExtension(path), ".pmp", StringComparison.OrdinalIgnoreCase)) return;
+                    transferPath = path;
+                    config.LastPmpDirectory = Path.GetDirectoryName(path) ?? "";
+                    Save();
+                }, 1, start);
+            }
+            ImGui.EndDisabled();
+            ImGui.SameLine();
+            ImGui.TextUnformatted(transferPath.Length == 0 ? T("Файл не выбран", "No file selected") : Path.GetFileName(transferPath));
+            if (transferPath.Length > 0 && ImGui.IsItemHovered()) ImGui.SetTooltip(transferPath);
+            ImGui.TextWrapped(T("PMP — готовый архив Penumbra. Его можно отправить без установки себе. Установленные моды выбирай из обычного списка, отключив этот режим.", "PMP is a Penumbra archive. You can send it without installing it yourself. To send an installed mod, turn this mode off and use the mod list."));
+        }
         else ImGui.TextWrapped(T("Пакет выбранного мода будет собран автоматически. Ручной экспорт не нужен.", "The selected mod will be packaged automatically. No manual export is needed."));
         if (transferLaunchDraft.Length > 0)
         {

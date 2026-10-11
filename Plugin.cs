@@ -684,6 +684,7 @@ public sealed partial class Plugin : IDalamudPlugin
     private void Draw()
     {
         if (!DiagnosticsAcknowledged) { DrawDiagnosticsNotice(); return; }
+        transferFileDialog.Draw();
         if (settingsOpen) DrawSettings();
         DrawTransferNotice();
         if (config.OverlayVisible) DrawOverlay();
@@ -1653,6 +1654,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     public void Dispose()
     {
+        transferFileDialog.Reset();
         StopPairSync();
         RestoreOffset();
         CancelCarrierPlayback();
