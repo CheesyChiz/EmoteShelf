@@ -151,7 +151,7 @@ internal static class ModPackage
         }
     }
 
-    internal static string ExtractNew(byte[] bytes, string root, CancellationToken cancellation = default)
+    internal static string ExtractNew(byte[] bytes, string root, CancellationToken cancellation = default, Action? extractionCheckpoint = null)
     {
         cancellation.ThrowIfCancellationRequested();
         Validate(bytes);
@@ -159,12 +159,17 @@ internal static class ModPackage
         var directory = "EmoteShelfReceived_" + Guid.NewGuid().ToString("N");
         var target = Path.Combine(Path.GetFullPath(root), directory);
         if (Directory.Exists(target)) throw new IOException("package_destination");
-        Directory.CreateDirectory(target);
+        // Only complete mods become direct children of Penumbra's root. Keep partial
+        // files one level deeper, on the same volume for an atomic final rename.
+        var staging = Path.Combine(Path.GetFullPath(root), ".EmoteShelf-staging", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(staging);
+        try
+        {
         using var zip = new ZipArchive(new MemoryStream(bytes, false), ZipArchiveMode.Read);
         foreach (var entry in zip.Entries)
         {
             cancellation.ThrowIfCancellationRequested();
-            var path = Path.Combine(target, SafePath(entry.FullName).Replace('/', Path.DirectorySeparatorChar));
+            var path = Path.Combine(staging, SafePath(entry.FullName).Replace('/', Path.DirectorySeparatorChar));
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             using var destination = new FileStream(path, FileMode.CreateNew, FileAccess.Write);
             using var source = entry.Open();
@@ -175,14 +180,26 @@ internal static class ModPackage
                 cancellation.ThrowIfCancellationRequested();
                 destination.Write(buffer, 0, count);
             }
+            extractionCheckpoint?.Invoke();
         }
         cancellation.ThrowIfCancellationRequested();
         // Keep the sender's display name exactly as packaged. Only the generated
         // directory and removed stable IDs provide import isolation, not a name prefix.
-        var metaPath = Path.Combine(target, "meta.json");
+        var metaPath = Path.Combine(staging, "meta.json");
         var meta = JsonNode.Parse(File.ReadAllText(metaPath))!.AsObject();
         foreach (var key in meta.Select(p => p.Key).Where(k => k.Equals("Id", StringComparison.OrdinalIgnoreCase) || k.Equals("ModId", StringComparison.OrdinalIgnoreCase) || k.Equals("Identifier", StringComparison.OrdinalIgnoreCase)).ToArray()) meta.Remove(key);
         File.WriteAllText(metaPath, meta.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        cancellation.ThrowIfCancellationRequested();
+        Directory.Move(staging, target);
         return directory;
+        }
+        finally
+        {
+            // This exact GUID directory is ours and has never been registered with Penumbra.
+            // Cleanup failure must not mask the original extraction/cancellation error.
+            try { if (Directory.Exists(staging)) Directory.Delete(staging, true); }
+            catch (IOException) { }
+            catch (UnauthorizedAccessException) { }
+        }
     }
 }

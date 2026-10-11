@@ -65,6 +65,25 @@ internal static class ModPackageTests
                     throw new Exception("Whole-mod packaging dropped an unselected option or included an unrelated file");
             }
             var first = ModPackage.ExtractNew(Package(), root);
+            var beforeCancel = Directory.GetDirectories(root, "EmoteShelfReceived_*").Order().ToArray();
+            using (var cancellation = new CancellationTokenSource())
+            {
+                try
+                {
+                    ModPackage.ExtractNew(Package(), root, cancellation.Token, () => cancellation.Cancel());
+                    throw new Exception("Mid-extraction cancellation ignored");
+                }
+                catch (OperationCanceledException) { }
+            }
+            try
+            {
+                ModPackage.ExtractNew(Package(), root, default, () => throw new IOException("Simulated write failure"));
+                throw new Exception("Extraction failure ignored");
+            }
+            catch (IOException) { }
+            if (!beforeCancel.SequenceEqual(Directory.GetDirectories(root, "EmoteShelfReceived_*").Order()) ||
+                Directory.EnumerateFileSystemEntries(Path.Combine(root, ".EmoteShelf-staging")).Any())
+                throw new Exception("Interrupted extraction left a partial mod or staging files");
             var second = ModPackage.ExtractNew(Package(), root);
             if (first == second || !File.Exists(Path.Combine(root, first, "anim.pap"))) throw new Exception("Import isolation failed");
             foreach (var imported in new[] { first, second })

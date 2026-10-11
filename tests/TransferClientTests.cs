@@ -6,10 +6,11 @@ using System.Security.Cryptography;
 
 internal static class TransferClientTests
 {
-    private sealed class Fake(bool corrupt = false, bool changeLaunch = false, bool upload = false) : HttpMessageHandler
+    private sealed class Fake(bool corrupt = false, bool changeLaunch = false, bool upload = false, int loseComplete = 0) : HttpMessageHandler
     {
         internal bool Accepted, Downloaded, Completed, Failed;
         internal int FailureAttempts;
+        internal int CompleteAttempts;
         internal byte[]? Upload;
         internal readonly MemoryStream Uploaded = new();
         private bool dropped;
@@ -45,7 +46,15 @@ internal static class TransferClientTests
                     return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(response)) };
                 }
                 if (action == "accept") Accepted = true;
-                if (action == "complete") Completed = true;
+                if (action == "complete")
+                {
+                    CompleteAttempts++;
+                    if (loseComplete == 1 && CompleteAttempts == 1) throw new TaskCanceledException("Lost before commit");
+                    Completed = true;
+                    if (loseComplete == 2 && CompleteAttempts == 1) throw new TaskCanceledException("Lost after commit");
+                }
+                if (Completed)
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{\"transfer\":null,\"outcome\":\"completed\"}") };
                 if (action == "fail")
                 {
                     Failed = true;
@@ -73,6 +82,23 @@ internal static class TransferClientTests
     }
     internal static async Task Run()
     {
+        foreach (var mode in new[] { 1, 2 })
+        {
+            using var relay = new Fake(loseComplete: mode);
+            using var link = new LinkClient(new string('a', 64), relay);
+            await Until(() => link.Snapshot.State == "linked");
+            using var transfer = new TransferClient(link, Fake.Partner, relay);
+            await Until(() => transfer.Offer is not null);
+            transfer.Accept(Fake.Id);
+            ReceivedPackage? received = null;
+            await Until(() => (received ??= transfer.TakeReceived()) is not null);
+            transfer.Act("complete", Fake.Id);
+            await Until(() => transfer.Outcome == "completed");
+            if (relay.CompleteAttempts != 2 || transfer.Offer is not null || relay.Failed)
+                throw new Exception("Completion was not retried safely");
+            transfer.Dispose(); await transfer.Completion;
+            link.Dispose(); await link.Completion;
+        }
         using (var relay = new Fake())
         {
             using var link = new LinkClient(new string('a', 64), relay);

@@ -7,6 +7,30 @@ from transfers import Transfers
 
 
 class TransferTests(unittest.TestCase):
+    def test_completed_outcome_survives_lost_response_and_duplicate_command(self):
+        key = self.act(self.a, **self.offer)['transfer']['id']
+        self.act(self.b, action='accept', id=key)
+        self.act(self.a, action='upload', id=key, offset=0, chunk=base64.b64encode(self.payload).decode())
+        for _ in range(3):
+            self.assertEqual(self.act(self.b, action='complete', id=key)['outcome'], 'completed')
+            self.assertEqual(self.act(self.a, action='poll')['outcome'], 'completed')
+        with self.assertRaises(ValueError): self.act(self.a, action='complete', id=key)
+        with self.assertRaises(ValueError): self.act(self.b, action='fail', id=key)
+        self.store.cooldowns.clear()
+        new_key = self.act(self.a, **self.offer)['transfer']['id']
+        replay = self.act(self.b, action='complete', id=key)
+        self.assertEqual(replay['outcome'], '')
+        self.assertEqual(replay['transfer']['id'], new_key)
+        self.assertEqual(replay['transfer']['state'], 'offered')
+
+    def test_outcome_expires(self):
+        key = self.act(self.a, **self.offer)['transfer']['id']
+        self.act(self.b, action='reject', id=key)
+        self.now += self.store.TTL + 1
+        for user in self.links.users.values(): user['seen'] = self.now
+        self.assertEqual(self.act(self.a, action='poll')['outcome'], '')
+        self.assertFalse(self.store.terminal_receipts)
+
     def test_import_failure_notifies_sender_and_is_retry_safe(self):
         key = self.act(self.a, **self.offer)['transfer']['id']
         with self.assertRaises(ValueError): self.act(self.b, action='fail', id=key)
@@ -40,6 +64,9 @@ class TransferTests(unittest.TestCase):
         self.store.action(self.links, self.b, dict(action='complete', id=key), protocol=5)
         result = self.links.action(self.b)['launch']
         self.assertEqual((result['id'], result['status'], result['incoming']), ('1'*64, 'accepted', True))
+        original = self.links.users[self.a]['offer']
+        self.store.action(self.links, self.b, dict(action='complete', id=key), protocol=5)
+        self.assertIs(self.links.users[self.a]['offer'], original)
 
     def setUp(self):
         self.now = 100

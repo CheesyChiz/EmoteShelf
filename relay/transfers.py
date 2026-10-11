@@ -18,12 +18,12 @@ class Transfers:
         self.items = {}
         self.cooldowns = {}
         self.outcomes = {}
-        self.failed_receipts = {}
+        self.terminal_receipts = {}
 
     def finish(self, key, outcome):
         item = self.items.pop(key)
         for token in (item['sender'], item['receiver']):
-            self.outcomes[token] = (outcome, self.clock()+60)
+            self.outcomes[token] = (outcome, self.clock()+self.TTL)
 
     def prune(self, users):
         for key, item in list(self.items.items()):
@@ -32,7 +32,7 @@ class Transfers:
                 self.finish(key, 'expired')
         self.cooldowns = {k: v for k, v in self.cooldowns.items() if k in users and v > self.clock()}
         self.outcomes = {k: v for k, v in self.outcomes.items() if k in users and v[1] > self.clock()}
-        self.failed_receipts = {k: v for k, v in self.failed_receipts.items() if k in users and v[1] > self.clock()}
+        self.terminal_receipts = {k: v for k, v in self.terminal_receipts.items() if k in users and v[1] > self.clock()}
 
     def action(self, links, token, data, protocol=4):
         # Lock order: only the existing link lock. An unlink invalidates both directions.
@@ -80,8 +80,9 @@ class Transfers:
             else:
                 key = data.get('id')
                 item = self.items.get(key) if isinstance(key, str) else None
-                if action == 'fail' and set(data) == {'action', 'id'} and self.failed_receipts.get(token, (None, 0))[0] == key:
-                    return dict(outcome='installation_failed', transfer=None)
+                receipt = self.terminal_receipts.get(token)
+                if receipt and set(data) == {'action', 'id'} and (key, action, peer) == (receipt[0], receipt[2], receipt[3]):
+                    return self.snapshot(token)
                 if not item or token not in (item['sender'], item['receiver']):
                     raise ValueError('transfer_expired')
                 incoming = token == item['receiver']
@@ -107,8 +108,7 @@ class Transfers:
                             sender['offer'] = receiver['offer'] = dict(id=fields[0], family=fields[1],
                                 command=fields[2], role=fields[3], sender=item['sender'],
                                 status='accepted', until=self.clock()+60)
-                    if action == 'fail':
-                        self.failed_receipts[token] = (key, self.clock()+60)
+                    self.terminal_receipts[token] = (key, self.clock()+self.TTL, action, peer)
                     self.finish(key, {'complete': 'completed', 'reject': 'declined', 'cancel': 'cancelled', 'fail': 'installation_failed'}[action])
                 elif action == 'upload' and not incoming and item['state'] == 'accepted' and set(data) == {'action', 'id', 'offset', 'chunk'}:
                     if type(data['offset']) is not int or data['offset'] != len(item['payload']) or not isinstance(data['chunk'], str) or len(data['chunk']) > 4*((self.CHUNK+2)//3):
@@ -132,8 +132,12 @@ class Transfers:
                     return dict(chunk=base64.b64encode(item['payload'][offset:offset+self.CHUNK]).decode())
                 else:
                     raise ValueError('transfer_state')
-            item = next((v for v in self.items.values() if token in (v['sender'], v['receiver'])), None)
-            return dict(outcome=self.outcomes.pop(token, ('', 0))[0], transfer=None if not item else dict(
-                **{k: item[k] for k in ('id', 'name', 'size', 'sha256', 'state', 'launch')},
-                incoming=token == item['receiver'], offset=len(item['payload']),
-                remaining=max(0, int(item['expires']-self.clock()))))
+            return self.snapshot(token)
+
+    def snapshot(self, token):
+        item = next((v for v in self.items.values() if token in (v['sender'], v['receiver'])), None)
+        # Retain the outcome until TTL/new offer: an HTTP response can be lost.
+        return dict(outcome=self.outcomes.get(token, ('', 0))[0], transfer=None if not item else dict(
+            **{k: item[k] for k in ('id', 'name', 'size', 'sha256', 'state', 'launch')},
+            incoming=token == item['receiver'], offset=len(item['payload']),
+            remaining=max(0, int(item['expires']-self.clock()))))
