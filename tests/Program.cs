@@ -63,9 +63,11 @@ foreach (var yaw in new[] { 0f, MathF.PI / 2, -MathF.PI, MathF.Tau })
 {
     var anchor = new System.Numerics.Vector3(20, 7, -12);
     var follower = PairRules.DancePosition(anchor, yaw);
-    if (Math.Abs(System.Numerics.Vector3.Distance(anchor, follower) - 3) > .0001 ||
+    if (Math.Abs(System.Numerics.Vector3.Distance(anchor, follower) - 2) > .0001 ||
         follower.Y != anchor.Y || !PairRules.NearbyForMode(anchor, follower, true) ||
-        PairRules.NearbyForMode(anchor, follower, false)) throw new Exception("Dance geometry failed");
+        PairRules.ReadyToLaunch(anchor, yaw, follower, yaw) ||
+        Math.Abs(System.Numerics.Vector3.Dot(follower - anchor, new(MathF.Sin(yaw), 0, MathF.Cos(yaw)))) > .0001)
+        throw new Exception("Dance geometry failed");
 }
 if (PairRules.NearbyForMode(default, new(float.NaN, 0, 0), true) ||
     PairRules.NearbyForMode(default, new(3, 1, 0), true)) throw new Exception("Unsafe dance position accepted");

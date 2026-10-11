@@ -400,7 +400,8 @@ public sealed partial class Plugin
                 }
                 DrawTransferRoleOptions(transferSenderRole);
                 ImGui.PopID();
-                ImGui.Checkbox(T("Совместный танец — одна эмоция, 3 ялма между вами", "Shared dance — same emote, 3 yalms apart"), ref transferSharedDance);
+                if (ImGui.Checkbox(T("Совместный танец — одна эмоция, 2 ялма между вами", "Shared dance — same emote, 2 yalms apart"), ref transferSharedDance))
+                { config.SharedDance = transferSharedDance; Save(); }
                 if (transferSharedDance) transferReceiverRole = SnapshotBookmark(transferSenderRole);
                 else
                 {
@@ -499,7 +500,7 @@ public sealed partial class Plugin
                 "The package will be checked, installed separately and enabled in your current Penumbra collection, affecting all characters using it. Appearance, idle, sound and effects may change immediately; an emote command runs only with the playback offer below."));
             if (launch is not null)
             {
-                if (launch.Dance) ImGui.TextWrapped(T("Совместный танец — одна эмоция, 3 ялма между вами", "Shared dance — same emote, 3 yalms apart"));
+                if (launch.Dance) ImGui.TextWrapped(T("Совместный танец — одна эмоция, 2 ялма между вами", "Shared dance — same emote, 2 yalms apart"));
                 ImGui.TextWrapped(T("После установки: ", "After installation: ") + launch.Label + " · " + launch.Command);
                 if (launch.Pose is { } pose) ImGui.TextUnformatted(T("Слот: ", "Slot: ") + pose.ToString("00"));
                 foreach (var option in launch.Options) ImGui.TextWrapped(option.Key + ": " + string.Join(", ", option.Value));
@@ -570,6 +571,12 @@ public sealed partial class Plugin
             if (other is not null) transferReceiverRole = CreateBookmark(other, null);
         }
         transferSourceDirectory = bookmark.ModDirectory;
+        if (!transferSharedDance && transferReceiverRole is { } receiver && OfferRole(receiver) == OfferRole(bookmark))
+        {
+            var mod = discovered.FirstOrDefault(m => m.Directory == bookmark.ModDirectory && m.Command == bookmark.Command);
+            var slots = mod?.PoseSlots.Where(slot => slot != bookmark.PoseIndex).ToArray() ?? [];
+            if (slots.Length == 1) receiver.PoseIndex = slots[0];
+        }
         if (transferSharedDance) transferReceiverRole = SnapshotBookmark(bookmark);
         transferManualPackage = false;
         transferLaunchDraft = new TransferLaunch(bookmark.Name[..Math.Min(200, bookmark.Name.Length)], bookmark.Command,

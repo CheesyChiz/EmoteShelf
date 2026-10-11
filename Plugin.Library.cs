@@ -102,6 +102,9 @@ public sealed partial class Plugin
 
     private void DrawSavedOfferRoles(LaunchInvitation request)
     {
+        if (!config.PairPresets.Any(p =>
+            (OfferRole(p.Second) == request.Offer.Role && offerMods.Any(m => m.Directory == p.First.ModDirectory && m.Command == p.First.Command)) ||
+            (OfferRole(p.First) == request.Offer.Role && offerMods.Any(m => m.Directory == p.Second.ModDirectory && m.Command == p.Second.Command)))) return;
         if (!ImGui.BeginCombo(T("Сохранённая роль", "Saved role"), T("Выбрать…", "Choose…"))) return;
         for (var presetIndex = 0; presetIndex < config.PairPresets.Count; presetIndex++)
         {

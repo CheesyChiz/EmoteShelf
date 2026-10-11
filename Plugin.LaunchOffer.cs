@@ -46,7 +46,7 @@ public sealed partial class Plugin
         var active = mod.Variants.Where(v => draft.SavedOptions!.TryGetValue(v.Group, out var choices) && choices.Contains(v.Option)).ToArray();
         if (active.Any(v => !VariantCompatible(v, mod)))
             throw new InvalidOperationException(T("Выбери вариант для своей модели тела.", "Choose options compatible with your character model."));
-        var pose = IsPoseCommand(mod.Command)
+        var pose = IsPoseCommand(mod.Command) && mod.PoseSlots.Length <= 1
             ? PoseSlot.FromPaths(active.SelectMany(v => v.Paths), mod.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? "j_" : "") ?? draft.PoseIndex
             : draft.PoseIndex;
         return new Bookmark { ModDirectory = draft.ModDirectory, Command = draft.Command, IconId = draft.IconId, PoseIndex = pose, Offset = draft.Offset,
@@ -63,9 +63,21 @@ public sealed partial class Plugin
             offerEditorError = "";
             offerDraft = null;
             offerMods = discovered.Where(m => !IsCarrierCopy(m.Directory) && PairRules.Family(m.Name) == request.Offer.Family).ToArray();
+            if (request.Incoming)
+            {
+                var available = offerMods.Where(m => PairRules.Hash(m.Command.ToLowerInvariant()) != request.Offer.Command ||
+                    m.PoseSlots.Length > 1 || m.Variants.Length > 0).ToArray();
+                if (available.Length > 0) offerMods = available;
+            }
             // A different emote is a suggestion, not proof of a semantic role.
             var alternatives = offerMods.Select((m, i) => (m, i)).Where(x => PairRules.Hash(x.m.Command.ToLowerInvariant()) != request.Offer.Command).ToArray();
             if (offerMods.Length > 0) SelectOfferMod(alternatives.Length == 1 ? alternatives[0].i : 0);
+            if (request.Incoming && offerDraft is { } draft && OfferRole(draft) == request.Offer.Role)
+            {
+                var slots = offerMods[offerModIndex].PoseSlots;
+                var otherSlots = slots.Where(slot => slot != draft.PoseIndex).ToArray();
+                if (otherSlots.Length == 1) draft.PoseIndex = otherSlots[0];
+            }
         }
         ImGui.TextWrapped((LinkedPartner?.Name.TextValue ?? T("Партнёр", "Partner")) + $" · {request.Remaining}s");
         ImGui.TextWrapped(offerMods.FirstOrDefault()?.Name ?? T("Этот мод не найден в твоём списке.", "This mod is not in your local list."));
@@ -79,14 +91,16 @@ public sealed partial class Plugin
             }
             return;
         }
-        var occupied = offerMods.FirstOrDefault(m => PairRules.Hash(m.Command.ToLowerInvariant()) == request.Offer.Command);
+        var occupied = discovered.FirstOrDefault(m => PairRules.Family(m.Name) == request.Offer.Family &&
+            PairRules.Hash(m.Command.ToLowerInvariant()) == request.Offer.Command);
         ImGui.TextWrapped(T("Партнёр выбрал: ", "Partner selected: ") + (occupied?.EmoteName ?? T("другую локальную версию", "another local version")));
         ImGui.TextWrapped(T("Выбери свою роль. Другая эмоция предложена, если она одна; варианты одного слота проверь вручную.",
             "Choose your role. A unique alternative emote is suggested; verify same-slot role options yourself."));
         if (offerMods.Length > 0)
         {
             ImGui.SetNextItemWidth(-1);
-            if (ImGui.BeginCombo(T("##role", "##role"), offerMods[offerModIndex].EmoteName))
+            if (offerMods.Length == 1) ImGui.TextUnformatted(offerMods[offerModIndex].EmoteName);
+            else if (ImGui.BeginCombo(T("##role", "##role"), offerMods[offerModIndex].EmoteName))
             {
                 for (var i = 0; i < offerMods.Length; i++)
                     if (ImGui.Selectable(offerMods[i].EmoteName + "##" + i, offerModIndex == i)) SelectOfferMod(i);
@@ -97,6 +111,34 @@ public sealed partial class Plugin
             mod = offerMods[offerModIndex];
             if (offerDraft is not null)
             {
+                // Pose roles are primary controls, not saved bookmarks or hidden options.
+                if (IsPoseCommand(mod.Command) && mod.PoseSlots.Length > 1)
+                {
+                    var availableSlots = mod.PoseSlots.Where(slot =>
+                    {
+                        var candidate = SnapshotBookmark(offerDraft); candidate.PoseIndex = slot;
+                        return OfferRole(candidate) != request.Offer.Role;
+                    }).ToArray();
+                    if (availableSlots.Length == 1)
+                    {
+                        offerDraft.PoseIndex = availableSlots[0];
+                        ImGui.TextUnformatted(T("Слот: ", "Slot: ") + availableSlots[0].ToString("00"));
+                    }
+                    else
+                    {
+                    ImGui.SetNextItemWidth(-1);
+                    if (ImGui.BeginCombo("##offerPose", T("Слот: ", "Slot: ") + (offerDraft.PoseIndex?.ToString("00") ?? "?")))
+                    {
+                        foreach (var slot in availableSlots)
+                        {
+                            if (ImGui.Selectable(slot.ToString("00"), offerDraft.PoseIndex == slot)) offerDraft.PoseIndex = slot;
+                        }
+                        ImGui.EndCombo();
+                    }
+                    }
+                }
+                if (mod.Variants.Length > 0)
+                {
                 if (ImGui.BeginChild("offerOptions", new System.Numerics.Vector2(0, 180)))
                 foreach (var group in mod.Variants.GroupBy(v => v.Group))
                 {
@@ -135,15 +177,6 @@ public sealed partial class Plugin
                     ImGui.PopID();
                 }
                 ImGui.EndChild();
-                if (IsPoseCommand(mod.Command) && mod.PoseSlots.Length > 1)
-                {
-                    ImGui.SetNextItemWidth(-1);
-                    if (ImGui.BeginCombo("##offerPose", T("Слот: ", "Slot: ") + (offerDraft.PoseIndex?.ToString("00") ?? "?")))
-                    {
-                        foreach (var slot in mod.PoseSlots)
-                            if (ImGui.Selectable(slot.ToString("00"), offerDraft.PoseIndex == slot)) offerDraft.PoseIndex = slot;
-                        ImGui.EndCombo();
-                    }
                 }
             }
             ImGui.TextWrapped(T("Принятие разрешает обязательное выравнивание: подход, точную доводку позиции и угла, затем запуск.", "Accepting authorizes required alignment: approach, fine position/facing correction, then playback."));
@@ -172,8 +205,8 @@ public sealed partial class Plugin
 
     private void DrawDanceInvitation(LaunchInvitation request)
     {
-        ImGui.TextWrapped(T("Совместный танец: одинаковая эмоция, 3 ялма между вами, взгляд в одну сторону.",
-            "Shared dance: the same emote, 3 yalms apart, facing the same direction."));
+        ImGui.TextWrapped(T("Совместный танец: одинаковая эмоция, 2 ялма между вами, взгляд в одну сторону.",
+            "Shared dance: the same emote, 2 yalms apart, facing the same direction."));
         var mod = discovered.FirstOrDefault(m => !IsCarrierCopy(m.Directory) && PairRules.Family(m.Name) == request.Offer.Family &&
             PairRules.Hash(m.Command.ToLowerInvariant()) == request.Offer.Command);
         ImGui.TextWrapped(mod?.Name ?? T("Этот мод не найден в твоём списке.", "This mod is not in your local list."));

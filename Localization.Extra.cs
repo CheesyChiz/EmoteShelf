@@ -12,6 +12,8 @@ internal static partial class Localization
         }
     }
     private const string Additional = """
+Shared dance — same emote, 2 yalms apart|一緒に踊る — 同じエモート、間隔2ヤルム|Gemeinsam tanzen — gleiches Emote, 2 Yalme Abstand|Danse ensemble — même emote, à 2 yalms
+Shared dance: the same emote, 2 yalms apart, facing the same direction.|一緒に踊る：同じエモート、間隔2ヤルム、同じ方向を向きます。|Gemeinsamer Tanz: gleiches Emote, 2 Yalme Abstand, gleiche Blickrichtung.|Danse ensemble : même emote, à 2 yalms, dans la même direction.
 Browse for a local PMP. Up to 128 MiB; the server removes it after 10 minutes or unlinking. This sends a copy, not Lightless synchronization.|ローカルPMPを選択してください。最大128 MiB。10分後または接続解除時にサーバーから削除されます。Lightless同期ではなくコピーの転送です。|Lokale PMP auswählen. Bis zu 128 MiB; der Server löscht sie nach 10 Minuten oder Trennung. Dies sendet eine Kopie, keine Lightless-Synchronisierung.|Sélectionnez un PMP local. Jusqu’à 128 Mio ; suppression du serveur après 10 minutes ou déconnexion. Il s’agit d’une copie, pas d’une synchronisation Lightless.
 Loading animation for synchronization…|同期用のアニメーションを読み込み中…|Animation für die Synchronisierung wird geladen…|Chargement de l’animation pour la synchronisation…
 Use a local PMP file|ローカルPMPファイルを使用|Lokale PMP-Datei verwenden|Utiliser un fichier PMP local

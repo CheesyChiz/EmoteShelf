@@ -1149,6 +1149,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void DrawEmoteActions(EmoteMod mod)
     {
+        if (config.PairEnabled) DrawPairModeSelector();
         var labels = new[] { T("Предпросмотр", "Preview"), T("На панель", "Add to panel"), T("В паре", "Pair") };
         var available = ImGui.GetContentRegionAvail().X;
         var gap = ImGui.GetStyle().ItemSpacing.X;

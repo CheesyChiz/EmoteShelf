@@ -20,6 +20,8 @@ public sealed partial class Plugin
     private long nextLocalResourceCheck;
     private string missingResourcePath = "";
     private long nextMissingResourceLog;
+    private long nextPhaseDiagnostic;
+    private int phaseControlCount;
 
     private void StopPairSync()
     {
@@ -131,6 +133,11 @@ public sealed partial class Plugin
             double phase = 0, duration = 0;
             if (pairSession is null && lastAcceptedPair is not null && StillPlayingAcceptedEmote()) ReadLocalPhase(out phase, out duration);
             pairSync.Set(localResources, peerResourcesVerified, phase, duration);
+            if (pairSession is null && now >= nextPhaseDiagnostic)
+            {
+                nextPhaseDiagnostic = now + 5000;
+                PairDebug($"phase observation: localDuration={duration:F3} peerDuration={observation.Peer?.Duration:F3} controls={phaseControlCount} rttMs={observation.Rtt} ageMs={now-observation.Received} correction={config.MaintainPairPhase} driftMs={observedPhaseDrift*1000:F0}", true);
+            }
             if (pairSession is null && duration > 0 && observation.Peer is { Duration: > 0 } sample &&
                 observation.Received != lastPhaseSample && now-observation.Received < 1500 && observation.Rtt <= 200 &&
                 Math.Abs(duration-sample.Duration) <= .02 && sample.Age <= 1)
@@ -194,12 +201,14 @@ public sealed partial class Plugin
     private unsafe bool ReadLocalPhase(out double phase, out double duration)
     {
         phase = duration = 0;
+        phaseControlCount = 0;
         if (Objects.LocalPlayer is not { } player || !CanRewindLoop(player.Address, false)) return false;
         var actor = (Character*)player.Address;
         var human = (Human*)actor->DrawObject;
         var animation = human->Skeleton->PartialSkeletons[0].GetHavokAnimatedSkeleton(0);
         // Blended/ambiguous tracks are not a reliable phase measurement.
-        if (animation->AnimationControls.Length != 1) return false;
+        phaseControlCount = animation->AnimationControls.Length;
+        if (phaseControlCount != 1) return false;
         var control = animation->AnimationControls[0].Value;
         var binding = control->hkaAnimationControl.Binding.ptr;
         if (binding == null || binding->Animation.ptr == null) return false;

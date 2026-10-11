@@ -477,9 +477,9 @@ public sealed partial class Plugin
             throw new InvalidOperationException(T("Игра отклонила парную эмоцию.", "The game rejected the pair emote."));
     }
 
-    private void DrawPairSettings()
+    private void DrawPairModeSelector()
     {
-        var modes = new[] { T("Парная анимация — в одной точке", "Paired animation — same position"), T("Совместный танец — одна эмоция, 3 ялма между вами", "Shared dance — same emote, 3 yalms apart") };
+        var modes = new[] { T("Парная анимация — в одной точке", "Paired animation — same position"), T("Совместный танец — одна эмоция, 2 ялма между вами", "Shared dance — same emote, 2 yalms apart") };
         ImGui.SetNextItemWidth(Math.Min(440, ImGui.GetContentRegionAvail().X));
         if (ImGui.BeginCombo("##pairMode", modes[config.SharedDance ? 1 : 0]))
         {
@@ -487,6 +487,10 @@ public sealed partial class Plugin
                 if (ImGui.Selectable(modes[i], config.SharedDance == (i == 1))) { config.SharedDance = i == 1; Save(); }
             ImGui.EndCombo();
         }
+    }
+    private void DrawPairSettings()
+    {
+        DrawPairModeSelector();
         if (ImGui.Checkbox(T("Запуск в паре — экспериментально", "Pair launch — experimental"), ref config.PairEnabled)) { StopLink(); Save(); }
         if (!config.PairEnabled) return;
         DrawLinkSettings();
