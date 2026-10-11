@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Encodings.Web;
 
 namespace EmoteShelf;
 
@@ -17,6 +18,13 @@ internal sealed class TransferClient : IDisposable
     private readonly ConcurrentQueue<(object Message, byte[]? Payload)> commands = new();
     private readonly LinkClient link;
     private readonly string partner;
+    private readonly Action<string>? diagnostic;
+    private string stage = "poll", failedId = "";
+    private int failures;
+    // This is an application/json HTTP body, never HTML. Preserve Base64 '+' bytes
+    // instead of expanding them to six-byte Unicode escapes beyond the relay limit.
+    internal static JsonContent RequestContent(object message) => JsonContent.Create(message,
+        options: new JsonSerializerOptions(JsonSerializerDefaults.Web) { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
     private PackageOffer? offer;
     private PackageOffer? acceptedOffer;
     private ReceivedPackage? received;
@@ -30,9 +38,10 @@ internal sealed class TransferClient : IDisposable
     internal string Outcome => Volatile.Read(ref outcome);
     internal ReceivedPackage? TakeReceived() => Interlocked.Exchange(ref received, null);
     internal Task Completion { get; }
-    internal TransferClient(LinkClient link, string partner, HttpMessageHandler? handler = null)
+    internal TransferClient(LinkClient link, string partner, HttpMessageHandler? handler = null, Action<string>? diagnostic = null)
     {
         this.link = link; this.partner = partner;
+        this.diagnostic = diagnostic;
         http = new HttpClient(handler ?? new HttpClientHandler { AllowAutoRedirect = false })
         { BaseAddress = new("https://anarchyclan.ru/"), Timeout = TimeSpan.FromSeconds(10), MaxResponseContentBufferSize = 360000 };
         Completion = Run();
@@ -60,6 +69,8 @@ internal sealed class TransferClient : IDisposable
         }
         var bytes = output.ToArray();
         await Task.Run(() => ModPackage.Validate(bytes), stop.Token);
+        failedId = "";
+        failures = 0;
         commands.Enqueue((new { action = "offer", name = Path.GetFileName(path)[..Math.Min(100, Path.GetFileName(path).Length)],
             size = bytes.Length, sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes)), launch }, bytes));
         }
@@ -78,6 +89,8 @@ internal sealed class TransferClient : IDisposable
         {
             await Task.Run(() => ModPackage.Validate(bytes), stop.Token);
             if (name.Length is 0 or > 100 || name.Any(char.IsControl)) throw new InvalidDataException("package_metadata");
+            failedId = "";
+            failures = 0;
             commands.Enqueue((new { action = "offer", name, size = bytes.Length,
                 sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes)), launch }, bytes));
         }
@@ -88,9 +101,12 @@ internal sealed class TransferClient : IDisposable
     {
         if (link.Snapshot.State != "linked" || link.Snapshot.Partner != partner || Environment.TickCount64 - link.Snapshot.ReceivedAt >= 4000)
             throw new InvalidOperationException("transfer_not_linked");
-        using var request = new HttpRequestMessage(HttpMethod.Post, "v5/transfer") { Content = JsonContent.Create(message) };
+        using var request = new HttpRequestMessage(HttpMethod.Post, "v5/transfer") { Content = RequestContent(message) };
+        using (var body = JsonDocument.Parse(await request.Content.ReadAsStringAsync(stop.Token)))
+            stage = body.RootElement.GetProperty("action").GetString() ?? "unknown";
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", link.TransferCapability ?? throw new InvalidOperationException("transfer_not_linked"));
         await request.Content.LoadIntoBufferAsync();
+        if (request.Content.Headers.ContentLength > 360000) throw new InvalidDataException("transfer_body_size");
         using var response = await http.SendAsync(request, stop.Token);
         if (!response.IsSuccessStatusCode)
         {
@@ -130,8 +146,10 @@ internal sealed class TransferClient : IDisposable
                     var previous = offer;
                     Volatile.Write(ref offer, next);
                     if (next is not null) Volatile.Write(ref outcome, "");
-                    Volatile.Write(ref error, "");
+                    if (failedId.Length == 0) Volatile.Write(ref error, "");
                     if (next is null) { outgoing = null; outgoingId = ""; acceptedId = ""; if (previous is not null) Volatile.Write(ref proposalPending, 0); }
+                    else if (next.Id == failedId)
+                        await Send(new { action = next.Incoming ? "reject" : "cancel", id = next.Id });
                     else if (!next.Incoming && outgoing is { } uploadPayload)
                     {
                         if (outgoingId.Length == 0) outgoingId = next.Id;
@@ -162,11 +180,31 @@ internal sealed class TransferClient : IDisposable
                         downloadedId = next.Id;
                         Volatile.Write(ref received, new ReceivedPackage(next.Id, payload));
                     }
+                    failures = 0;
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException || !stop.IsCancellationRequested)
                 {
-                    Volatile.Write(ref error, ex is InvalidDataException or InvalidOperationException or HttpRequestException ? ex.Message : "transfer_failed");
+                    var code = ex switch
+                    {
+                        OperationCanceledException => "transfer_timeout",
+                        HttpRequestException h when !h.Message.StartsWith("transfer_") => "transfer_network",
+                        JsonException or KeyNotFoundException or FormatException => "transfer_response",
+                        InvalidDataException or InvalidOperationException or HttpRequestException => ex.Message,
+                        _ => "transfer_internal",
+                    };
+                    if (code.Length > 80 || !code.All(c => char.IsAsciiLetterOrDigit(c) || c == '_')) code = "transfer_internal";
+                    diagnostic?.Invoke($"stage={stage} code={code} type={ex.GetType().Name} attempt={failures + 1}");
+                    Volatile.Write(ref error, code);
+                    // Poll again before retrying uploads: a timed-out response may have
+                    // committed its chunk already. The relay offset is authoritative.
+                    if ((stage is "upload" or "download" or "poll") &&
+                        (code is "transfer_timeout" or "transfer_network" or "transfer_http_502" or "transfer_http_503" or "transfer_http_504") && ++failures <= 3)
+                    {
+                        await Task.Delay(1000, stop.Token);
+                        continue;
+                    }
                     // Keep errors visible; never repeatedly retry a rejected archive automatically.
+                    failedId = offer?.Id ?? "";
                     if (offer is { Incoming: true } bad && acceptedId == bad.Id) downloadedId = bad.Id;
                     outgoing = null;
                     Volatile.Write(ref proposalPending, 0);

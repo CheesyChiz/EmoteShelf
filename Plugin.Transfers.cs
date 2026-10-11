@@ -40,7 +40,7 @@ public sealed partial class Plugin
             if (transfers is null || transferPartner != link.Snapshot.Partner)
             {
                 StopTransfers(); transferPartner = link.Snapshot.Partner;
-                transfers = new TransferClient(link, transferPartner);
+                transfers = new TransferClient(link, transferPartner, diagnostic: detail => Log.Warning("Mod transfer transport: {Detail}", detail));
             }
         }
         else if (transfers is not null) StopTransfers();
@@ -197,6 +197,7 @@ public sealed partial class Plugin
             "Transfer did not complete. Check the connection and PMP package; it may be damaged, too large or contain unsupported data.") + "\n" + safe;
         var reason = safe switch
         {
+            "transfer_timeout" or "transfer_network" => T("Связь с сервером прервалась. Плагин повторит передачу до трёх раз; при повторном сбое отправьте мод заново.", "The relay connection was interrupted. The plugin retries up to three times; if it still fails, send the mod again."),
             "package_size" or "package_expansion" or "package_entries" => T("Превышен лимит размера или количества файлов. Экспортируй меньший пакет.", "The size or file-count limit was exceeded. Export a smaller package."),
             "package_path" or "package_link" or "package_file_type" => T("Архив содержит запрещённый путь, ссылку или тип файла. Он не установлен.", "The archive contains a forbidden path, link or file type. It was not installed."),
             "package_missing_file" or "package_metadata" or "package_truncated" => T("В пакете отсутствуют файлы или повреждены данные. Экспортируй PMP заново.", "The package has missing files or invalid data. Export the PMP again."),
@@ -321,7 +322,8 @@ public sealed partial class Plugin
         }
         else
         {
-            ImGui.TextUnformatted(offer.State == "offered" ? T("Ожидаем принятия", "Waiting for acceptance") : T("Передача и проверка…", "Transferring and checking…"));
+            if (transfers.Error.Length == 0)
+                ImGui.TextUnformatted(offer.State == "offered" ? T("Ожидаем принятия", "Waiting for acceptance") : T("Передача и проверка…", "Transferring and checking…"));
             if (ImGui.Button(T("Отмена", "Cancel"))) transfers.Act(offer.Incoming ? "reject" : "cancel", offer.Id);
         }
     }

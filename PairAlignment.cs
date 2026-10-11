@@ -22,6 +22,7 @@ internal sealed unsafe class PairAlignment : IDisposable
     private int correctionFrames, stableFrames, acceptableFrames;
     private readonly List<string> samples = [];
     private long started;
+    private long correctionStarted;
     public string Diagnostics => string.Join(" | ", samples);
 
     // Bounded, relative-only samples: no actor names, world coordinates or network tokens.
@@ -70,6 +71,7 @@ internal sealed unsafe class PairAlignment : IDisposable
             throw new InvalidOperationException("Final correction exceeds 0.10 yalms or has invalid coordinates.");
         Begin(point, rotation);
         finalCorrection = correcting = true;
+        correctionStarted = started;
         expires = started + 1200;
         Sample("post-prepare-refinement");
     }
@@ -99,9 +101,12 @@ internal sealed unsafe class PairAlignment : IDisposable
         // The peer still independently verifies its own view; this is not a network acknowledgement.
         if (stableFrames >= 3 && (!finalCorrection || Environment.TickCount64 - started >= 350))
         { Sample("arrived"); Active = false; Arrived = true; return; }
-        if (++correctionFrames > 12 && !finalCorrection) { Fail("Position/facing did not stabilize; pair launch cancelled."); return; }
+        ++correctionFrames;
         character->GameObject.SetPosition(destination.X, destination.Y, destination.Z);
-        character->GameObject.SetRotation(facing);
+        // Let the approach's automatic turn settle before applying facing. A fixed
+        // twelve-frame limit was only ~150 ms at the user's frame rate.
+        if (Environment.TickCount64 - correctionStarted >= 350)
+            character->GameObject.SetRotation(facing);
         Sample("after");
     }
 
@@ -131,6 +136,8 @@ internal sealed unsafe class PairAlignment : IDisposable
             if (Vector3.Distance(player.Position, destination) > .05f)
             { Fail("Too much height difference for fine alignment."); return; }
             correcting = true;
+            correctionStarted = now;
+            expires = now + 1200;
             Sample("fine-start");
             return;
         }

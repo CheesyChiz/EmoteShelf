@@ -6,9 +6,12 @@ using System.Security.Cryptography;
 
 internal static class TransferClientTests
 {
-    private sealed class Fake(bool corrupt = false, bool changeLaunch = false) : HttpMessageHandler
+    private sealed class Fake(bool corrupt = false, bool changeLaunch = false, bool upload = false) : HttpMessageHandler
     {
         internal bool Accepted, Downloaded, Completed;
+        internal byte[]? Upload;
+        internal readonly MemoryStream Uploaded = new();
+        private bool dropped;
         internal readonly byte[] Bytes = ModPackageTests.Package();
         internal const string Partner = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
         internal const string Id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -25,6 +28,21 @@ internal static class TransferClientTests
             {
                 if (request.Headers.Authorization?.Parameter != new string('x', 43)) throw new Exception("Transfer capability missing");
                 var action = data.GetProperty("action").GetString();
+                if (upload)
+                {
+                    if (request.Content.Headers.ContentLength > 360000) throw new Exception("Relay body limit exceeded");
+                    if (action == "offer") Accepted = true;
+                    if (action == "upload")
+                    {
+                        if (data.GetProperty("offset").GetInt32() != Uploaded.Length) throw new Exception("Duplicate upload after lost acknowledgement");
+                        Uploaded.Write(Convert.FromBase64String(data.GetProperty("chunk").GetString()!));
+                        if (!dropped) { dropped = true; throw new TaskCanceledException("Simulated lost response after commit"); }
+                    }
+                    response = new { transfer = !Accepted ? null : new { id = Id, name = "Test.pmp", size = Upload!.Length,
+                        sha256 = Convert.ToHexStringLower(SHA256.HashData(Upload)), state = Uploaded.Length == Upload.Length ? "ready" : "accepted",
+                        incoming = false, offset = Uploaded.Length, remaining = 600, launch = "" } };
+                    return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(response)) };
+                }
                 if (action == "accept") Accepted = true;
                 if (action == "complete") Completed = true;
                 if (action == "download")
@@ -42,12 +60,41 @@ internal static class TransferClientTests
     }
     private static async Task Until(Func<bool> check)
     {
-        for (var i = 0; i < 100; i++) { if (check()) return; await Task.Delay(50); }
+        for (var i = 0; i < 200; i++) { if (check()) return; await Task.Delay(50); }
         throw new Exception("Transfer client test timed out");
     }
     internal static async Task Run()
     {
+        foreach (var bytes in new[] { RandomNumberGenerator.GetBytes(256 * 1024), Enumerable.Repeat((byte)251, 256 * 1024).ToArray() })
+        using (var content = TransferClient.RequestContent(new { action = "upload", id = Fake.Id, offset = 0,
+            chunk = Convert.ToBase64String(bytes) }))
+        {
+            await content.LoadIntoBufferAsync();
+            if (content.Headers.ContentLength > 360000) throw new Exception("Serialized upload exceeds relay body limit");
+            using var body = JsonDocument.Parse(await content.ReadAsStringAsync());
+            if (!Convert.FromBase64String(body.RootElement.GetProperty("chunk").GetString()!).SequenceEqual(bytes))
+                throw new Exception("Upload serialization changed package bytes");
+        }
         var launch = new TransferLaunch("Wave", "/wave", null, new() { ["Style"] = ["Default"] });
+        using (var relay = new Fake(upload: true))
+        {
+            using var packed = new MemoryStream();
+            using (var zip = new System.IO.Compression.ZipArchive(packed, System.IO.Compression.ZipArchiveMode.Create, true))
+            {
+                using (var entry = zip.CreateEntry("meta.json").Open()) entry.Write(Encoding.UTF8.GetBytes("{\"Name\":\"Test\",\"FileVersion\":3}"));
+                using (var entry = zip.CreateEntry("default_mod.json").Open()) entry.Write(Encoding.UTF8.GetBytes("{\"Files\":{\"chara/test.pap\":\"anim.pap\"}}"));
+                using (var entry = zip.CreateEntry("anim.pap").Open()) entry.Write(RandomNumberGenerator.GetBytes(700000));
+            }
+            relay.Upload = packed.ToArray();
+            using var link = new LinkClient(new string('a', 64), relay);
+            await Until(() => link.Snapshot.State == "linked");
+            using var transfer = new TransferClient(link, Fake.Partner, relay);
+            await transfer.ProposePackage(relay.Upload, "Test.pmp");
+            await Until(() => transfer.Offer?.State == "ready");
+            if (!relay.Upload.SequenceEqual(relay.Uploaded.ToArray())) throw new Exception("Resumed upload bytes differ");
+            transfer.Dispose(); await transfer.Completion;
+            link.Dispose(); await link.Completion;
+        }
         if (TransferLaunch.Decode(launch.Encode())?.Command != "/wave") throw new Exception("Launch selection round trip failed");
         foreach (var invalid in new[] { "/wave\n/logout", "/wave <t>", "/wave;logout" })
         {

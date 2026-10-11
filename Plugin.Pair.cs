@@ -151,6 +151,7 @@ public sealed partial class Plugin
     {
         CancelCarrierPlayback();
         CancelPair();
+        lastLaunchFailure = "";
         pairDance = dance;
         pairCheckpoint = "preflight";
         lastPairStage = "";

@@ -43,6 +43,7 @@ public sealed partial class Plugin : IDalamudPlugin
     private readonly RedrawObject redraw = new(Pi);
     private readonly IDisposable redrawCompletedSubscription;
     private readonly ResolvePath resolvePath = new(Pi);
+    private readonly ResolveGameObjectPath resolveActorPath = new(Pi);
     private List<EmoteMod> discovered = [];
     private EmoteCatalog? catalog;
     private bool settingsOpen;

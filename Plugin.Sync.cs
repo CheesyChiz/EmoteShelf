@@ -31,13 +31,18 @@ public sealed partial class Plugin
     }
     private Dictionary<string, string> ResolveResources(IEnumerable<string> paths, ushort actor)
     {
-        var (valid, _, collection) = getCollection.Invoke(actor);
+        var (valid, _, _) = getCollection.Invoke(actor);
         if (!valid) throw new InvalidOperationException("resource_collection");
         var result = new Dictionary<string, string>();
         foreach (var path in paths)
         {
-            if (!SyncRules.ValidPath(path) || resolvePath.Invoke(collection.Id, path, out var file) != PenumbraApiEc.Success || !Path.IsPathRooted(file))
-                throw new InvalidOperationException("resource_unresolved");
+            if (!SyncRules.ValidPath(path)) throw new InvalidOperationException("resource_invalid_path");
+            // GUID resolution searches persistent collection storage. Lightless uses
+            // temporary actor collections; resolve through the actor association instead.
+            var file = resolveActorPath.Invoke(path, actor);
+            if (!Path.IsPathRooted(file))
+                throw new InvalidOperationException(actor == Objects.LocalPlayer?.ObjectIndex
+                    ? "resource_local_not_mapped" : "resource_partner_not_mapped");
             result.Add(path, file);
         }
         return result;
