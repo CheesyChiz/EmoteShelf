@@ -143,14 +143,26 @@ try
         "Groups":[{"Name":"Song","Type":"Single","Options":[
         {"Name":"To Zanarkand","Files":{"sound/guitar.scd":"song1.scd"}},
         {"Name":"Town","Files":{"sound/guitar.scd":"song2.scd"}},
-        {"Name":"None","Files":{"chara/human/c0101/animation/a0001/bt_common/emote/j_pose01_loop.pap":"silent.pap"}}]},
+        {"Name":"None","Files":{"chara/human/c0101/animation/a0001/bt_common/emote/j_pose01_loop.pap":"silent.pap"}},
+        {"Name":"Base style"}]},
         {"Name":"Music","Type":"Multi","Options":[{"Name":"On","Files":{"sound/music.scd":"music.scd"}}]}]}
         """);
     var song = ModScanner.Scan(testRoot, new Dictionary<string, string> { ["SongFixture"] = "SongFixture" }, new EmoteCatalog(), _ => []).Single();
-    if (song.BasePaths.Length != 1 || song.Variants.Count(v => v.Group == "Song") != 3 || !song.Variants.Single(v => v.Group == "Music").Multi)
+    if (song.BasePaths.Length != 1 || song.Variants.Count(v => v.Group == "Song") != 4 || !song.Variants.Single(v => v.Group == "Music").Multi)
         throw new Exception("Song-only options, DefaultData or Multi group were lost.");
     if (!song.Variants.Single(v => v.Option == "Town").HasSound || song.Variants.Single(v => v.Option == "None").HasSound)
         throw new Exception("Selected sound resources were not distinguished from silent variants.");
+    var empty = song.Variants.Single(v => v.Option == "Base style");
+    if (empty.Paths.Length != 0 || empty.Files.Count != 0 || !ModScanner.VariantApplies(empty, song, _ => false))
+        throw new Exception("Base-only choice lost or rejected.");
+    var raceOverride = new EmoteVariant("PAP", "PAP", ["other-race.pap"], null);
+    var raceMod = song with { Paths = ["base.pap", "other-race.pap"], BasePaths = ["base.pap"] };
+    if (!ModScanner.VariantApplies(raceOverride, raceMod, p => p == "base.pap"))
+        throw new Exception("Other-race supplement blocked compatible base animation.");
+    if (ModScanner.VariantApplies(raceOverride, raceMod with { BasePaths = [] }, _ => false))
+        throw new Exception("Incompatible variant without a base animation was accepted.");
+    if (!ModScanner.VariantApplies(raceOverride, raceMod with { BasePaths = [] }, _ => null))
+        throw new Exception("Unknown compatibility was rejected.");
 }
 finally
 {

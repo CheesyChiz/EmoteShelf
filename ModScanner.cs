@@ -248,7 +248,8 @@ public static partial class ModScanner
             if (optionName.Length == 0) continue;
             var optionPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             Collect(option, optionPaths);
-            if (option.TryGetProperty("Files", out _) || option.TryGetProperty("FileSwaps", out _))
+            // An empty option selects the base files (or disables an optional group).
+            // It is still a real choice and must not disappear from the UI.
             {
                 var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 if (option.TryGetProperty("Files", out var filesJson) && filesJson.ValueKind == JsonValueKind.Object)
@@ -260,6 +261,14 @@ public static partial class ModScanner
                     { Files = files, Multi = string.Equals(type.GetString(), "Multi", StringComparison.OrdinalIgnoreCase), HasSound = DirectHasSound(option) });
             }
         }
+    }
+
+    internal static bool VariantApplies(EmoteVariant variant, EmoteMod mod, Func<string, bool?> matches)
+    {
+        var paths = variant.Paths.Where(p => mod.Paths.Contains(p, StringComparer.OrdinalIgnoreCase)).ToArray();
+        // A race-specific override does not disable base animation files for other races.
+        // Unknown compatibility is not evidence of incompatibility.
+        return paths.Length == 0 || paths.Concat(mod.BasePaths).Any(p => matches(p) != false);
     }
 
     private static int? InferGroundSitPose(string description, IEnumerable<string> paths)

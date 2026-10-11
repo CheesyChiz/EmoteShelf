@@ -1163,8 +1163,8 @@ public sealed partial class Plugin : IDalamudPlugin
             var bookmark = CreateBookmark(mod, null);
             bookmark.SavedOptions = draftOptions[mod.Directory].ToDictionary(x => x.Key, x => x.Value.ToList());
             var active = mod.Variants.Where(v => bookmark.SavedOptions.TryGetValue(v.Group, out var values) && values.Contains(v.Option)).ToArray();
-            if (!showAllVariants && active.Any(v => !VariantCompatible(v, mod)))
-                throw new InvalidOperationException(T("Выбран вариант для другой модели. Выбери совместимый вариант или включи «Показать все».", "An option for another model is selected. Choose a compatible option or enable Show all."));
+            if (active.Any(v => !VariantCompatible(v, mod)))
+                throw new InvalidOperationException(T("Выбери вариант для своей модели тела.", "Choose options compatible with your character model."));
             bookmark.Name = $"{mod.Name} — {mod.EmoteName} — " + string.Join("; ", active.Select(v => $"{v.Group}: {v.Option}"));
             var pose = PoseSlot.FromPaths(active.SelectMany(v => v.Paths), mod.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? "j_" : "");
             if (IsPoseCommand(mod.Command) && pose.HasValue) bookmark.PoseIndex = pose;
@@ -1192,12 +1192,11 @@ public sealed partial class Plugin : IDalamudPlugin
         var draw = (CharacterBase*)((Character*)player.Address)->GameObject.DrawObject;
         if (draw == null || draw->GetObjectType() != ObjectType.CharacterBase || draw->GetModelType() != CharacterBase.ModelType.Human) return true;
         var model = ((Human*)draw)->RaceSexId;
-        var paths = variant.Paths.Where(p => mod.Paths.Contains(p, StringComparer.OrdinalIgnoreCase)).ToArray();
-        return paths.Length == 0 || paths.Any(p =>
+        return ModScanner.VariantApplies(variant, mod, p =>
         {
             if (!compatibilityCache.TryGetValue((model, p), out var match))
                 compatibilityCache[(model, p)] = match = papCompatibility.Matches(p, model);
-            return match != false;
+            return match;
         });
     }
 
