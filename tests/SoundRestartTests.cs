@@ -11,6 +11,14 @@ internal static class SoundRestartTests
                 throw new Exception("Previous emotes must not be stopped before accepted pairing");
         }
         var motion = new EmoteStopMotion();
+        foreach (var facing in new[] { 0f, 1f, -2f, MathF.PI })
+        foreach (var camera in new[] { 0f, .5f, -MathF.PI })
+        {
+            var pulse = EmoteStopMotion.PulseInput(facing, camera);
+            var worldFacing = MathF.Atan2(pulse.X, pulse.Y) + camera;
+            if (PairRules.AngleDistance(worldFacing, facing) > .0001f || MathF.Abs(pulse.Length() - .1f) > .0001f)
+                throw new Exception("Stop pulse must follow existing facing, not turn backwards");
+        }
         var origin = new System.Numerics.Vector3(10, 5, 20);
         motion.Begin(origin, 1, 100);
         if (!motion.Validate(origin, 101, true, false)) throw new Exception("Stop pulse did not start");
@@ -28,6 +36,10 @@ internal static class SoundRestartTests
             if (motion.Validate(position, kind == "timeout" ? 1600 : 120, kind != "actor", kind == "manual") ||
                 motion.Stage != EmoteStopMotion.State.Failed || motion.Restore(origin, 1, 200))
                 throw new Exception("Unsafe stop restoration: " + kind);
+            if (motion.Failure != kind) throw new Exception("Missing stop failure reason: " + kind);
+            motion.Begin(origin, 1, 2000);
+            if (!motion.Validate(origin, 2001, true, false) || motion.Failure != "none")
+                throw new Exception("Previous stop failure poisoned a new attempt");
         }
         motion.Cancel();
         if (motion.Active) throw new Exception("Cancelled movement remained active");

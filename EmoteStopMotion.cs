@@ -9,6 +9,9 @@ internal sealed class EmoteStopMotion
     internal State Stage { get; private set; }
     internal Vector3 Origin { get; private set; }
     internal float Facing { get; private set; }
+    internal string Failure { get; private set; } = "none";
+    internal static Vector2 PulseInput(float facing, float cameraYaw)
+        => new(MathF.Sin(facing - cameraYaw) * .1f, MathF.Cos(facing - cameraYaw) * .1f);
     private long deadline, pulsedAt;
     private int stable;
     internal bool Active => Stage is State.Pulse or State.Restore;
@@ -17,15 +20,16 @@ internal sealed class EmoteStopMotion
         if (!float.IsFinite(origin.X + origin.Y + origin.Z + facing))
             throw new InvalidOperationException("sound_stop_invalid_position");
         Origin = origin; Facing = facing; deadline = now + 1500;
-        pulsedAt = 0; stable = 0; Stage = State.Pulse;
+        pulsedAt = 0; stable = 0; Failure = "none"; Stage = State.Pulse;
     }
     internal bool Validate(Vector3 position, long now, bool safe, bool manualInput)
     {
         if (!Active) return false;
-        if (!safe || manualInput || now >= deadline ||
-            !float.IsFinite(position.X + position.Y + position.Z) ||
-            Vector3.Distance(position, Origin) > .10f || MathF.Abs(position.Y - Origin.Y) > .03f)
-        { Stage = State.Failed; return false; }
+        Failure = !safe ? "actor" : manualInput ? "manual" : now >= deadline ? "timeout"
+            : !float.IsFinite(position.X + position.Y + position.Z) ? "position"
+            : Vector3.Distance(position, Origin) > .10f ? "distance"
+            : MathF.Abs(position.Y - Origin.Y) > .03f ? "height" : "none";
+        if (Failure != "none") { Stage = State.Failed; return false; }
         return true;
     }
     internal void Pulsed(long now)
@@ -40,5 +44,5 @@ internal sealed class EmoteStopMotion
         if (now - pulsedAt >= 350 && stable >= 3) { Stage = State.Complete; return false; }
         return true;
     }
-    internal void Cancel() { Stage = State.Inactive; stable = 0; }
+    internal void Cancel() { Stage = State.Inactive; stable = 0; Failure = "none"; }
 }

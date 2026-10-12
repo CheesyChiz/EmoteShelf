@@ -18,6 +18,7 @@ internal sealed unsafe class PairAlignment : IDisposable
     private nint emoteStopAddress;
     public bool StoppingEmote => emoteStop.Active;
     public bool EmoteStopFailed => emoteStop.Stage == EmoteStopMotion.State.Failed;
+    public string EmoteStopFailure => emoteStop.Failure;
 
     public void BeginEmoteStop(Func<bool> safe)
     {
@@ -154,16 +155,19 @@ internal sealed unsafe class PairAlignment : IDisposable
         hook.Original(context, lateral, forward, turn, mode, extra, additive);
         if (emoteStop.Active)
         {
+            // Only the primary input pass represents a fresh movement request.
+            // Additive passes may contain the pulse already injected by this hook.
+            if (additive != 0) return;
             if (!emoteStop.Validate(objects.LocalPlayer?.Position ?? new Vector3(float.NaN), Environment.TickCount64,
                 SafeEmoteStop(), *lateral != 0 || *forward != 0 || *turn != 0)) return;
-            if (additive != 0 || emoteStop.Stage != EmoteStopMotion.State.Pulse) return;
+            if (emoteStop.Stage != EmoteStopMotion.State.Pulse) return;
             var stopManager = CameraManager.Instance();
             var stopCamera = stopManager == null ? null : stopManager->GetActiveCamera();
             if (stopCamera == null) { emoteStop.Validate(Vector3.Zero, Environment.TickCount64, false, false); return; }
             var stopYaw = ((FFXIVClientStructs.FFXIV.Client.Game.Camera*)stopCamera)->DirH + MathF.PI;
-            var relativeStop = emoteStop.Facing + MathF.PI - stopYaw;
-            *lateral = MathF.Sin(relativeStop) * .1f;
-            *forward = MathF.Cos(relativeStop) * .1f;
+            var pulse = EmoteStopMotion.PulseInput(emoteStop.Facing, stopYaw);
+            *lateral = pulse.X;
+            *forward = pulse.Y;
             emoteStop.Pulsed(Environment.TickCount64);
             return;
         }

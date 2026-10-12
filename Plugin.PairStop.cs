@@ -26,7 +26,10 @@ public sealed partial class Plugin
             if (IsPlayingEmote()) StopSoundEmote();
         }
         if (soundStopNudged && pairAlignment?.EmoteStopFailed == true)
-        { soundFailure = "state"; throw new InvalidOperationException("sound_stop_motion_failed"); }
+        {
+            Log.Warning("Emote stop motion failed: {Reason}", pairAlignment.EmoteStopFailure);
+            soundFailure = "state"; throw new InvalidOperationException("sound_stop_motion_failed");
+        }
         if (!soundStopNudged && CanPair(local) && IsPlayingEmote()) BeginSoundStopMotion();
         if (pairAlignment?.StoppingEmote != true &&
             (System.Numerics.Vector3.Distance(local.Position, pairOrigin) > .08f ||

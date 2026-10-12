@@ -265,6 +265,9 @@ public sealed partial class Plugin
         pairSession = null;
         pairStopStarted = pairStopComplete = false;
         pairStopGate.Reset();
+        soundRestart.Reset();
+        applySoundSettings = null;
+        soundStopNudged = false;
         pairAlignment?.Cancel();
         pairBookmark = null;
         pairHeldCommand = "";

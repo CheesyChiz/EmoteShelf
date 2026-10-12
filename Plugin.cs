@@ -462,7 +462,10 @@ public sealed partial class Plugin : IDalamudPlugin
                     if (soundRestart.Stage == SoundRestart.State.AwaitIdle)
                     {
                         if (soundStopNudged && pairAlignment?.EmoteStopFailed == true)
+                        {
+                            Log.Warning("Emote stop motion failed: {Reason}", pairAlignment.EmoteStopFailure);
                             throw new InvalidOperationException("sound_stop_motion_failed");
+                        }
                         if (!soundStopNudged && IsPlayingEmote() && CanPair(soundActor))
                             BeginSoundStopMotion();
                         if (!soundRestart.ObserveIdle(Environment.TickCount64,
