@@ -43,8 +43,12 @@ public sealed partial class Plugin
         if (ImGui.BeginPopup("bookmarkEditor"))
         {
             DrawEmoteCategory(b.ModDirectory, b.Command);
-            if (config.PairEnabled && ImGui.MenuItem(T("Запустить один раз в другом режиме", "Launch once in the other mode")))
-                BeginPair(SnapshotBookmark(b), !DefaultDance(b.ModDirectory, b.Command));
+            if (config.PairEnabled && ImGui.BeginMenu(T("Запустить один раз в другом режиме", "Launch once in the other mode")))
+            {
+                for (var mode = 0; mode < 3; mode++)
+                    if (ImGui.MenuItem(CategoryLabels()[mode])) BeginPair(SnapshotBookmark(b), mode != 0, mode == 2);
+                ImGui.EndMenu();
+            }
             b.RoleLabel ??= ""; b.Alias ??= "";
             DrawOffsetBookmark(b);
             DrawBrioBookmark(b);

@@ -108,6 +108,7 @@ public sealed partial class Plugin : IDalamudPlugin
         config = Pi.GetPluginConfig() as Configuration ?? new Configuration();
         config.Bookmarks ??= [];
         config.EmoteDanceModes = new(config.EmoteDanceModes ?? [], StringComparer.OrdinalIgnoreCase);
+        config.EmoteDanceInvitations = new(config.EmoteDanceInvitations ?? [], StringComparer.OrdinalIgnoreCase);
         config.CommandOverrides ??= new(StringComparer.OrdinalIgnoreCase);
         config.HiddenMods ??= new(StringComparer.OrdinalIgnoreCase);
         config.PoseOverrides ??= new(StringComparer.OrdinalIgnoreCase);
@@ -236,6 +237,7 @@ public sealed partial class Plugin : IDalamudPlugin
 
     private void Play(Bookmark bookmark, bool pairPreparation = false)
     {
+        soundFailure = "none";
         CancelCarrierPlayback();
         RestoreOffset();
         if (!pairPreparation) lastAcceptedPair = null;
@@ -485,6 +487,8 @@ public sealed partial class Plugin : IDalamudPlugin
                 catch (Exception ex)
                 {
                     pendingCommand = ""; pendingPoseIndex = -1;
+                    soundFailure = ex.Message == "sound_restart_idle_timeout" ? "idle_timeout"
+                        : ex.Message == "sound_restart_redraw_timeout" ? "redraw_timeout" : "state";
                     soundRestart.Reset();
                     applySoundSettings = null;
                     status = ex.Message == "sound_restart_idle_timeout"
@@ -492,12 +496,12 @@ public sealed partial class Plugin : IDalamudPlugin
                         : T("Не удалось подтвердить перерисовку для перезапуска звука. Анимация не запущена; попробуй ещё раз.",
                             "Redraw could not be confirmed for sound restart. The animation was not started; try again.");
                     if (pairSession is not null) { pairCheckpoint = "prepare_validation"; CancelPair(status); }
+                    else if (DiagnosticsAcknowledged)
+                        errorReports.Send("launch_cancelled", "timeout", link?.Snapshot.State ?? "none", LinkFresh,
+                            LightlessLoaded(), "", null, null,
+                            CapturePlaybackContext(new ReportContext("none", false, false, true, true, false, 0)));
                     ClearPendingValidation();
                     Log.Warning("Sound restart failed: {Reason}", ex is InvalidOperationException ? ex.Message : ex.GetType().Name);
-                    errorReports.Send("launch_cancelled", ex.Message is "sound_restart_redraw_timeout" or "sound_restart_idle_timeout" ? "timeout" :
-                        ex.Message == "sound_restart_actor_changed" ? "actor_state" : "prepare_mod",
-                        link?.Snapshot.State ?? "none", LinkFresh, LightlessLoaded(), "", null, null,
-                        new ReportContext("none", false, false, true, true, false, 0));
                     return;
                 }
             }
@@ -1258,7 +1262,7 @@ public sealed partial class Plugin : IDalamudPlugin
         ImGui.EndDisabled();
     }
 
-    private void PlayDraft(EmoteMod mod, bool add, bool pair = false, bool transfer = false, bool? dance = null)
+    private void PlayDraft(EmoteMod mod, bool add, bool pair = false, bool transfer = false, bool? dance = null, bool? inviteOnly = null)
     {
         try
         {
@@ -1270,9 +1274,9 @@ public sealed partial class Plugin : IDalamudPlugin
             bookmark.Name = $"{mod.Name} — {mod.EmoteName} — " + string.Join("; ", active.Select(v => $"{v.Group}: {v.Option}"));
             var pose = PoseSlot.FromPaths(active.SelectMany(v => v.Paths), mod.Command.Equals("/groundsit", StringComparison.OrdinalIgnoreCase) ? "j_" : "");
             if (IsPoseCommand(mod.Command) && pose.HasValue) bookmark.PoseIndex = pose;
-            if (transfer) PrepareTransferLaunch(bookmark, dance);
+            if (transfer) PrepareTransferLaunch(bookmark, dance, inviteOnly);
             else if (add) { config.Bookmarks.Add(bookmark); config.OverlayVisible = true; Save(); status = T("Добавлено на панель.", "Added to panel."); }
-            else if (pair) BeginPair(bookmark, dance);
+            else if (pair) BeginPair(bookmark, dance, inviteOnly);
             else Play(bookmark);
         }
         catch (Exception ex) { status = ex.Message; Log.Warning(ex, "Selected options failed"); }

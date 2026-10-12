@@ -1,5 +1,11 @@
 # Required diagnostics with first-use disclosure
 
+Playback context additionally carries bounded actor mode (or -1 when absent), game emote ID,
+active-emote flag, stationary-dance flag, relative height difference, and a closed sound-failure
+enum (`none`, `idle_timeout`, `redraw_timeout`, `state`). Pair failures retain their attempt ID
+so both clients' reports can be correlated. No raw log, exception text, character name, file path
+or absolute position is collected. Deploy the updated report validator before the matching client.
+
 Extended reports accept an optional closed `context` object: pair protocol state, anchor role,
 alignment/preparation flags, local readiness and bounded stable-frame count. Failure checkpoints
 are allowlisted enum values, not exception messages. Old clients remain accepted. These fields

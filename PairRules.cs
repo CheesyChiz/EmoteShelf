@@ -10,6 +10,9 @@ public static class PairRules
     public const float LaunchDistanceTolerance = .10f;
     public static Vector3 DancePosition(Vector3 anchor, float yaw)
         => anchor + new Vector3(MathF.Cos(yaw) * 2, 0, -MathF.Sin(yaw) * 2);
+    public static Vector3 GroundedDestination(Vector3 destination, Vector3 actor, bool dance)
+        => dance && float.IsFinite(actor.Y) && MathF.Abs(destination.Y - actor.Y) <= .25f
+            ? new Vector3(destination.X, actor.Y, destination.Z) : destination;
     public static bool NearbyForMode(Vector3 a, Vector3 b, bool dance)
         => WithinApproachRange(a, b, 10);
     public static bool WithinApproachRange(Vector3 a, Vector3 b, float maximum)

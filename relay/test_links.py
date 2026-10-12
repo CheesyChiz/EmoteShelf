@@ -3,6 +3,23 @@ from links import LinkStore
 
 
 class LinkTests(unittest.TestCase):
+    def test_stationary_dance_requires_capability_consent_and_preserves_restart_mode(self):
+        invitation = self.invite()['invitation']
+        self.store.action(self.b, 'accept', invitation=invitation)
+        for token in (self.a, self.b): self.store.users[token]['dance'] = True
+        offer = dict(id='1'*64, family='2'*64, command='3'*64, role='4'*64,
+                     dance=True, invite_only=True, options={'Music': ['On']})
+        with self.assertRaises(ValueError): self.store.action(self.a, 'propose', offer=offer)
+        for token in (self.a, self.b): self.store.users[token]['invite_only'] = True
+        self.store.action(self.a, 'propose', offer=offer)
+        incoming = self.store.action(self.b)['launch']
+        self.assertTrue(incoming['invite_only'])
+        self.assertEqual(incoming['status'], 'waiting')
+        with self.assertRaises(ValueError): self.store.action(self.a, 'finish_launch', invitation=offer['id'])
+        self.store.action(self.b, 'accept_launch', invitation=offer['id'])
+        for token in (self.a, self.b): self.store.action(token, 'finish_launch', invitation=offer['id'])
+        self.assertTrue(self.store.action(self.a, 'restart')['launch']['invite_only'])
+
     def test_missing_mod_request_is_bound_to_incoming_waiting_offer(self):
         invitation = self.invite()['invitation']
         self.store.action(self.b, 'accept', invitation=invitation)

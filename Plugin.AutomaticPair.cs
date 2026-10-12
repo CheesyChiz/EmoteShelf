@@ -64,7 +64,7 @@ public sealed partial class Plugin
         }
         queuedTransferPair = null;
         automaticPairHandled = proposal.Offer.Id;
-        BeginPairCore(SnapshotBookmark(agreed.Role), proposal.Offer.Id, agreed.Family, proposal.Previous.Length > 0, proposal.Offer.Dance);
+        BeginPairCore(SnapshotBookmark(agreed.Role), proposal.Offer.Id, agreed.Family, proposal.Previous.Length > 0, proposal.Offer.Dance, proposal.Offer.InviteOnly);
     }
 
     private void RememberPairPlayback()

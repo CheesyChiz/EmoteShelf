@@ -205,8 +205,10 @@ public sealed partial class Plugin
 
     private void DrawDanceInvitation(LaunchInvitation request)
     {
-        ImGui.TextWrapped(T("Совместный танец: одинаковая эмоция, 2 ялма между вами, взгляд в одну сторону.",
-            "Shared dance: the same emote, 2 yalms apart, facing the same direction."));
+        ImGui.TextWrapped(request.Offer.InviteOnly
+            ? T("Танец на месте: после принятия общий запуск по таймеру, без перемещения и разворота.", "Stationary dance: shared timed start after acceptance, without movement or turning.")
+            : T("Совместный танец: одинаковая эмоция, 2 ялма между вами, взгляд в одну сторону.",
+                "Shared dance: the same emote, 2 yalms apart, facing the same direction."));
         var mod = discovered.FirstOrDefault(m => !IsCarrierCopy(m.Directory) && PairRules.Family(m.Name) == request.Offer.Family &&
             PairRules.Hash(m.Command.ToLowerInvariant()) == request.Offer.Command);
         ImGui.TextWrapped(mod?.Name ?? T("Этот мод не найден в твоём списке.", "This mod is not in your local list."));
@@ -228,7 +230,7 @@ public sealed partial class Plugin
                     if (IsPoseCommand(draft.Command) || OfferRole(draft) != request.Offer.Role)
                         throw new InvalidOperationException(T("Настройки танца не совпали с установленным модом. Обновите мод у обоих.",
                             "Dance settings do not match the installed mod. Update the mod on both clients."));
-                    BeginPairCore(draft, request.Offer.Id, dance: true);
+                    BeginPairCore(draft, request.Offer.Id, dance: true, inviteOnly: request.Offer.InviteOnly);
                     if (pairSession is not null) link!.Act("accept_launch", invitation: request.Offer.Id);
                     else offerEditorError = pairMessage;
                 }

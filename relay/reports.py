@@ -32,8 +32,21 @@ def validate(data):
         flags = {'Anchor', 'AlignStarted', 'PreparationStarted', 'Preparing', 'Ready'}
         resource_fields = {'ResourceStatus', 'LocalAssets', 'PeerAssets', 'LocalVerified', 'PeerVerified', 'SyncHttpStatus'}
         base_fields = flags | {'PairState', 'StableFrames'}
-        if not isinstance(context, dict) or set(context) not in (base_fields, base_fields | resource_fields):
+        playback_fields = {'ActorMode', 'EmoteId', 'Emoting', 'StationaryDance', 'HeightDelta', 'SoundFailure'}
+        if not isinstance(context, dict) or set(context) not in (base_fields, base_fields | resource_fields, base_fields | resource_fields | playback_fields):
             raise ValueError('context schema')
+        if 'ActorMode' in context:
+            if type(context['ActorMode']) is not int or not -1 <= context['ActorMode'] <= 255:
+                raise ValueError('actor mode')
+            if type(context['EmoteId']) is not int or not 0 <= context['EmoteId'] <= 65535:
+                raise ValueError('emote id')
+            if any(type(context[k]) is not bool for k in ('Emoting', 'StationaryDance')):
+                raise ValueError('playback flags')
+            height = context['HeightDelta']
+            if height is not None and (type(height) not in (int, float) or not math.isfinite(height) or abs(height) > 100):
+                raise ValueError('height delta')
+            if context['SoundFailure'] not in {'none', 'idle_timeout', 'redraw_timeout', 'state'}:
+                raise ValueError('sound failure')
         if 'ResourceStatus' in context:
             if context['ResourceStatus'] not in {'none', 'transport', 'mismatch', 'unavailable', 'local_pending', 'peer_missing', 'peer_pending', 'verified'}:
                 raise ValueError('resource status')

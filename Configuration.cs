@@ -9,6 +9,7 @@ public sealed class Configuration : IPluginConfiguration
     public bool OverlayVisible = true;
     public bool SharedDance;
     public Dictionary<string, bool> EmoteDanceModes = new(StringComparer.OrdinalIgnoreCase);
+    public HashSet<string> EmoteDanceInvitations = new(StringComparer.OrdinalIgnoreCase);
     public List<Bookmark> Bookmarks = [];
     public List<PairPreset> PairPresets = [];
     public Dictionary<string, string> CommandOverrides = new(StringComparer.OrdinalIgnoreCase);

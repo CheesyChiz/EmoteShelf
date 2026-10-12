@@ -18,6 +18,7 @@ public sealed partial class Plugin
     private readonly Dalamud.Interface.ImGuiFileDialog.FileDialogManager transferFileDialog = new();
     private Bookmark? transferSenderRole, transferReceiverRole;
     private bool transferSharedDance;
+    private bool transferStationary;
     private TransferLaunch? acceptedTransferLaunch;
     private string transferPartner = "", transferPath = "", transferMessage = "", lastTransferError = "";
     private bool transferAcknowledged;
@@ -400,8 +401,14 @@ public sealed partial class Plugin
                 }
                 DrawTransferRoleOptions(transferSenderRole);
                 ImGui.PopID();
-                if (ImGui.Checkbox(T("Совместный танец — одна эмоция, 2 ялма между вами", "Shared dance — same emote, 2 yalms apart"), ref transferSharedDance))
-                { /* This offer only; the saved category is unchanged. */ }
+                var mode = transferStationary ? 2 : transferSharedDance ? 1 : 0;
+                if (ImGui.BeginCombo("##transferLaunchMode", CategoryLabels()[mode]))
+                {
+                    for (var i = 0; i < 3; i++)
+                        if (ImGui.Selectable(CategoryLabels()[i], mode == i))
+                        { transferSharedDance = i != 0; transferStationary = i == 2; }
+                    ImGui.EndCombo();
+                }
                 if (transferSharedDance) transferReceiverRole = SnapshotBookmark(transferSenderRole);
                 else
                 {
@@ -436,7 +443,7 @@ public sealed partial class Plugin
                 var family = PairRules.Hash("transfer-pair:" + id);
                 launch = new TransferLaunch(receiver.Name[..Math.Min(200, receiver.Name.Length)], receiver.Command, receiver.PoseIndex,
                     receiver.SavedOptions?.ToDictionary(p => p.Key, p => p.Value.ToList()) ?? [])
-                { PairId = id, Family = family, SenderCommand = PairRules.Hash(sender.Command.ToLowerInvariant()), SenderRole = OfferRole(sender), Dance = transferSharedDance }.Encode();
+                { PairId = id, Family = family, SenderCommand = PairRules.Hash(sender.Command.ToLowerInvariant()), SenderRole = OfferRole(sender), Dance = transferSharedDance, InviteOnly = transferStationary }.Encode();
                 queuedTransferPair = new(SnapshotBookmark(sender), id, family, transferPartner,
                     ClientState.TerritoryType, Environment.TickCount64 + 660000);
             }
@@ -558,10 +565,12 @@ public sealed partial class Plugin
         ImGui.End();
     }
 
-    private void PrepareTransferLaunch(Bookmark bookmark, bool? dance = null)
+    private void PrepareTransferLaunch(Bookmark bookmark, bool? dance = null, bool? inviteOnly = null)
     {
         transferSenderRole = SnapshotBookmark(bookmark);
         transferSharedDance = dance ?? DefaultDance(bookmark.ModDirectory, bookmark.Command);
+        transferStationary = inviteOnly ?? (dance is null && DefaultDanceInvitation(bookmark.ModDirectory, bookmark.Command));
+        if (transferStationary) transferSharedDance = true;
         transferReceiverRole = config.Bookmarks.Where(b => b.ModDirectory == bookmark.ModDirectory && OfferRole(b) != OfferRole(bookmark))
             .Select(SnapshotBookmark).FirstOrDefault();
         if (transferReceiverRole is null)

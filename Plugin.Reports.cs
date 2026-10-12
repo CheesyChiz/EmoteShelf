@@ -32,6 +32,7 @@ public sealed partial class Plugin
     }
     private void DrawReportDisclosure()
     {
+        ImGui.TextWrapped(T("При сбое также отправляются режим персонажа, ID и признак активности эмоции, тип таймаута звука, режим танца и относительный перепад высоты.", "Failures also report character mode, emote ID/activity, sound timeout type, dance mode and relative height difference."));
         ImGui.TextWrapped(T("При приглашении на совместный танец партнёру через сервер передаются названия выбранных вариантов мода. Они хранятся временно для приглашения и повторного запуска, не в отчётах.", "Shared dance invitations send selected mod option names to your partner through the relay. They are kept temporarily for invitations and restarts, not in reports."));
         ImGui.TextWrapped(T("Для проверки пары через сервер партнёру также передаются названия игровых ресурсов, контрольные суммы SHA-256 и время анимации. Локальные пути на диске и содержимое файлов в эту проверку не входят. Эти данные временно хранятся в памяти, не в диагностических отчётах.", "Pair verification also exchanges game resource names, SHA-256 checksums and animation timing through the relay with your partner. Local disk paths and file contents are not part of this verification. These samples expire in memory and are not diagnostic reports."));
         ImGui.TextWrapped(T("Передаются: версия плагина, случайные ID отчёта/попытки, технический код и этап сбоя, состояние связи и Lightless, флаги подготовки, расстояние и угол между участниками. Полные логи, имена, чат, токены, пути и абсолютные координаты не отправляются. Сервер видит IP соединения, но не записывает его в отчёт. Доступ к отчётам имеет администратор Emote Shelf по SSH. Хранение до 14 дней с очисткой раз в час; база ограничена 10 000 отчётов / 32 МиБ. При недоступности сети — ограниченные повторы в памяти; выход из игры удаляет очередь.",
@@ -57,7 +58,7 @@ public sealed partial class Plugin
         errorReports.Send(code, detail, link?.Snapshot.State ?? "none", LinkFresh, LightlessLoaded(), pairOfferId,
             local is not null && peer is not null ? Vector3.Distance(local.Position, peer.Position) : null,
             local is not null && peer is not null ? PairRules.AngleDistance(local.Rotation, peer.Rotation) : null,
-            new ReportContext(pairSession?.Snapshot.State ?? "none", pairSession?.Snapshot.Anchor ?? false,
+            CapturePlaybackContext(new ReportContext(pairSession?.Snapshot.State ?? "none", pairSession?.Snapshot.Anchor ?? false,
                 pairAlignStarted, pairStartedPreparation, pairPreparing, pairReadySent, Math.Clamp(pairStableFrames, 0, 1000))
             {
                 ResourceStatus = ResourceReportStatus(),
@@ -66,7 +67,24 @@ public sealed partial class Plugin
                 LocalVerified = peerResourcesVerified,
                 PeerVerified = pairSync?.Observation.Peer?.Verified ?? false,
                 SyncHttpStatus = ResourceHttpStatus(),
-            });
+            }));
+    }
+
+    private string soundFailure = "none";
+    private unsafe ReportContext CapturePlaybackContext(ReportContext context)
+    {
+        var player = Objects.LocalPlayer;
+        var actor = player is null ? null : (FFXIVClientStructs.FFXIV.Client.Game.Character.Character*)player.Address;
+        var height = player is not null && LinkedPartner is { } peer ? player.Position.Y - peer.Position.Y : float.NaN;
+        return context with
+        {
+            ActorMode = actor == null ? -1 : (int)actor->Mode,
+            EmoteId = actor == null ? 0 : actor->EmoteController.EmoteId,
+            Emoting = actor != null && actor->EmoteController.IsEmoting(),
+            StationaryDance = pairSession is not null && pairStationary,
+            HeightDelta = float.IsFinite(height) && MathF.Abs(height) <= 100 ? height : null,
+            SoundFailure = soundFailure,
+        };
     }
     private void DrawReportSettings()
     {

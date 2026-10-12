@@ -12,6 +12,9 @@ internal static partial class Localization
         }
     }
     private const string Additional = """
+Failures also report character mode, emote ID/activity, sound timeout type, dance mode and relative height difference.|エラー時にはキャラクターモード、エモートIDと再生状態、音声タイムアウトの種類、ダンスモード、相対的な高低差も送信されます。|Bei Fehlern werden auch Charaktermodus, Emote-ID/Aktivität, Audio-Timeouttyp, Tanzmodus und relativer Höhenunterschied gemeldet.|Les erreurs signalent aussi le mode du personnage, l'ID et l'activité de l'emote, le type de délai audio, le mode de danse et l'écart de hauteur relatif.
+Shared dance — no movement|移動なしの同時ダンス|Gemeinsamer Tanz — ohne Bewegung|Danse partagée — sans déplacement
+Stationary dance: shared timed start after acceptance, without movement or turning.|承認後に同時開始します。移動や方向転換は行いません。|Tanz am Platz: gemeinsamer Start nach Annahme, ohne Bewegung oder Drehung.|Danse sur place : départ commun après acceptation, sans déplacement ni rotation.
 Move closer: within 10 yalms and on the same level.|同じ高さで10ヤルム以内に近づいてください。|Kommt auf gleicher Höhe bis auf 10 Yalme heran.|Rapprochez-vous à moins de 10 yalms, au même niveau.
 Default launch category|既定の起動カテゴリ|Standard-Startkategorie|Catégorie de lancement par défaut
 Launch once in the other mode|別のモードで一度だけ起動|Einmal im anderen Modus starten|Lancer une fois dans l’autre mode

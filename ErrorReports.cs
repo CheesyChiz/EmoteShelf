@@ -15,6 +15,12 @@ internal sealed record ReportContext(string PairState, bool Anchor, bool AlignSt
     public bool LocalVerified { get; init; }
     public bool PeerVerified { get; init; }
     public int SyncHttpStatus { get; init; }
+    public int ActorMode { get; init; } = -1;
+    public int EmoteId { get; init; }
+    public bool Emoting { get; init; }
+    public bool StationaryDance { get; init; }
+    public float? HeightDelta { get; init; }
+    public string SoundFailure { get; init; } = "none";
 }
 
 // Closed metadata only. Plugin gates Send behind a versioned first-use disclosure.

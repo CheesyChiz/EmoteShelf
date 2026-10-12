@@ -4,6 +4,7 @@ public sealed partial class Plugin
 {
     private string requestedMissingMod = "", sentMissingMod = "";
     private Bookmark? missingModResume;
+    private bool missingModStationary;
     private TransferClient? missingModClient;
     private string missingModPartner = "";
     private bool missingModDance, missingModOffered;
@@ -24,7 +25,7 @@ public sealed partial class Plugin
                 missingModResume = null;
                 if (outcome == "completed" && proposal is null && pairSession is null)
                 {
-                    BeginPair(resume, missingModDance);
+                    BeginPair(resume, missingModDance, missingModStationary);
                 }
             }
         }
@@ -57,6 +58,7 @@ public sealed partial class Plugin
             var name = ModPackage.DisplayFileName(getMods.Invoke()[directory]);
             missingModResume = bookmark; missingModClient = client; missingModPartner = transferPartner;
             missingModTerritory = ClientState.TerritoryType; missingModDance = dance;
+            missingModStationary = request.Offer.InviteOnly;
             missingModOffered = false; missingModUntil = Environment.TickCount64 + 660000;
             transferSending = Task.Run(async () => await client.ProposePackage(ModPackage.PackMod(root, directory), name, ""));
         }

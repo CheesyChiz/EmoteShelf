@@ -25,11 +25,14 @@ public sealed partial class Plugin
     private float pairTargetFacing;
     private bool pairUntargetedPlayback;
     private bool pairDance;
+    private bool pairStationary;
     private Vector3 PairDestination(Vector3 anchor, float yaw) => pairDance ? PairRules.DancePosition(anchor, yaw) : anchor;
+    private Vector3 PairDestinationOnGround(Vector3 anchor, float yaw, Vector3 actor)
+        => PairRules.GroundedDestination(PairDestination(anchor, yaw), actor, pairDance);
     private bool PairGeometryReady(IPlayerCharacter local, IPlayerCharacter peer)
-        => string.CompareOrdinal(pairSelf, pairOther) < 0
-            ? PairRules.ReadyToLaunch(PairDestination(local.Position, local.Rotation), local.Rotation, peer.Position, peer.Rotation)
-            : PairRules.ReadyToLaunch(local.Position, local.Rotation, PairDestination(peer.Position, peer.Rotation), peer.Rotation);
+        => pairStationary || (string.CompareOrdinal(pairSelf, pairOther) < 0
+            ? PairRules.ReadyToLaunch(PairDestinationOnGround(local.Position, local.Rotation, peer.Position), local.Rotation, peer.Position, peer.Rotation)
+            : PairRules.ReadyToLaunch(local.Position, local.Rotation, PairDestinationOnGround(peer.Position, peer.Rotation, local.Position), peer.Rotation));
     private int pairStableFrames;
     private bool pairReadySent;
     private string lastLaunchFailure = "";
@@ -65,7 +68,10 @@ public sealed partial class Plugin
             measurements = string.Format(System.Globalization.CultureInfo.InvariantCulture,
                 T("\nРасстояние: {0:F4} ялма (допуск ≤0,1); угол: {1:F2}° (допуск ≤0,57°).",
                   "\nDistance: {0:F4} yalms (limit ≤0.1); angle: {1:F2}° (limit ≤0.57°)."),
-                Vector3.Distance(local.Position, peer.Position), PairRules.AngleDistance(local.Rotation, peer.Rotation) * 180 / MathF.PI);
+                string.CompareOrdinal(pairSelf, pairOther) < 0
+                    ? Vector3.Distance(PairDestinationOnGround(local.Position, local.Rotation, peer.Position), peer.Position)
+                    : Vector3.Distance(local.Position, PairDestinationOnGround(peer.Position, peer.Rotation, local.Position)),
+                PairRules.AngleDistance(local.Rotation, peer.Rotation) * 180 / MathF.PI);
         return Localization.Runtime(config.Language, reason) + measurements + "\n" + advice;
     }
     private bool pairRefining, pairRefined;
@@ -129,7 +135,7 @@ public sealed partial class Plugin
            !Conditions[ConditionFlag.BetweenAreas51] && !Conditions[ConditionFlag.Jumping] &&
            ((Character*)player.Address)->Mode == CharacterModes.Normal;
 
-    private void BeginPair(Bookmark bookmark, bool? dance = null)
+    private void BeginPair(Bookmark bookmark, bool? dance = null, bool? inviteOnly = null)
     {
         if (link?.Snapshot.Launch is not null)
         {
@@ -138,26 +144,30 @@ public sealed partial class Plugin
             return;
         }
         var id = PairRules.Hash(Guid.NewGuid().ToString());
-        BeginPairCore(bookmark, id, dance: dance ?? DefaultDance(bookmark.ModDirectory, bookmark.Command));
+        var stationary = inviteOnly ?? (dance is null && DefaultDanceInvitation(bookmark.ModDirectory, bookmark.Command));
+        BeginPairCore(bookmark, id, dance: stationary || (dance ?? DefaultDance(bookmark.ModDirectory, bookmark.Command)), inviteOnly: stationary);
         if (pairSession is not null && pairBookmark is not null)
         {
             var mod = discovered.First(m => m.Directory == bookmark.ModDirectory && m.Command.Equals(bookmark.Command, StringComparison.OrdinalIgnoreCase));
             link!.Act("propose", offer: new LaunchOffer(id, PairRules.Family(mod.Name), PairRules.Hash(bookmark.Command.ToLowerInvariant()), OfferRole(bookmark), pairDance,
-                pairDance ? pairBookmark.SavedOptions : null));
+                pairDance ? pairBookmark.SavedOptions : null, pairStationary));
         }
     }
 
-    private void BeginPairCore(Bookmark bookmark, string offerId, string? sharedFamily = null, bool restart = false, bool dance = false)
+    private void BeginPairCore(Bookmark bookmark, string offerId, string? sharedFamily = null, bool restart = false, bool dance = false, bool inviteOnly = false)
     {
         CancelCarrierPlayback();
         CancelPair();
         lastLaunchFailure = "";
         pairDance = dance;
+        pairStationary = inviteOnly;
         pairCheckpoint = "preflight";
         lastPairStage = "";
         pairCollectionWarning = "";
         try
         {
+            if (inviteOnly && (!dance || link?.Snapshot.InvitationPeer != true))
+                throw new InvalidOperationException("Update both clients and reconnect for stationary dance.");
             if (!config.PairEnabled) throw new InvalidOperationException(T("Включи экспериментальный запуск в паре в настройках.", "Enable experimental pair launch in Settings."));
             if (link?.Snapshot.State == "linked" && !link.Snapshot.CurrentPeer)
                 throw new InvalidOperationException(T("Партнёру нужно обновить Emote Shelf до 0.3.9.1 и переподключиться.", "Your partner needs to update Emote Shelf to 0.3.9.1 and reconnect."));
@@ -183,7 +193,7 @@ public sealed partial class Plugin
                     "You and your partner share a Penumbra collection: selected options may affect both. Different roles need correctly configured collections/mod synchronization.");
             // Freeze this client's role/options; no network response can replace them.
             pairBookmark = new Bookmark { ModDirectory = bookmark.ModDirectory, Name = bookmark.Name, Command = bookmark.Command,
-                IconId = bookmark.IconId, PoseIndex = bookmark.PoseIndex, Offset = bookmark.Offset,
+                IconId = bookmark.IconId, PoseIndex = bookmark.PoseIndex, Offset = inviteOnly ? null : bookmark.Offset,
                 SavedOptions = bookmark.SavedOptions?.ToDictionary(x => x.Key, x => x.Value.ToList()) };
             pendingCommand = "";
             pendingPoseIndex = -1;
@@ -327,7 +337,7 @@ public sealed partial class Plugin
             if (snapshot.State is "connecting" or "waiting") return;
             pairCheckpoint = "alignment_consent";
             if (!snapshot.Align) throw new InvalidOperationException(T("Партнёр не подтвердил обязательное выравнивание. Обновите плагин у обоих.", "Partner did not enable required alignment. Update both plugins."));
-            if (snapshot.Align && !snapshot.Anchor && !pairStartedPreparation && !pairRestart)
+            if (!pairStationary && snapshot.Align && !snapshot.Anchor && !pairStartedPreparation && !pairRestart)
             {
                 pairCheckpoint = "partner_movement";
                 if (Vector3.Distance(target.Position, pairTargetOrigin) > .08f || PairRules.AngleDistance(target.Rotation, pairTargetFacing) > .08f)
@@ -376,7 +386,7 @@ public sealed partial class Plugin
                     }
                     pairCheckpoint = "post_prepare_alignment";
                     if (now > pairConfirmUntil) throw new InvalidOperationException(T("Координаты и поворот не совпали после подготовки. Запуск отменён.", "Position/facing did not match after preparation. Launch cancelled."));
-                    if (!snapshot.Anchor && !pairRefined && !pairRestart)
+                    if (!pairStationary && !snapshot.Anchor && !pairRefined && !pairRestart)
                     {
                         if (Vector3.Distance(target.Position, pairTargetOrigin) > .08f ||
                             PairRules.AngleDistance(target.Rotation, pairTargetFacing) > .08f)
@@ -384,7 +394,7 @@ public sealed partial class Plugin
                         if (!pairRefining)
                         {
                             pairAlignment ??= new PairAlignment(Interop, Objects);
-                            pairAlignment.BeginFinalCorrection(PairDestination(target.Position, target.Rotation), target.Rotation);
+                            pairAlignment.BeginFinalCorrection(PairDestination(target.Position, target.Rotation), target.Rotation, pairDance);
                             pairAlignStarted = pairRefining = true;
                             PairDebug($"attempt={pairOfferId} final correction started", true);
                             pairMessage = T("Довожу координаты и поворот после подготовки…", "Refining position and facing after preparation…");
@@ -420,7 +430,7 @@ public sealed partial class Plugin
             if (!PairGeometryReady(local, target))
                 throw new InvalidOperationException(T("Перед стартом координаты или поворот разошлись. Запуск отменён.", "Position or facing diverged before start. Launch cancelled."));
             pairCheckpoint = "dispatch";
-            if (snapshot.Align) ApplyPairFacing(pairFacing);
+            if (snapshot.Align && !pairStationary) ApplyPairFacing(pairFacing);
             pairUntargetedPlayback = true;
             DispatchPreparedCommand(pairHeldCommand);
             ScheduleOffset(pairBookmark);

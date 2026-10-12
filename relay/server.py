@@ -202,9 +202,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(data, dict):
                     raise ValueError('Invalid message')
                 if self.path == '/v2/connect':
-                    if set(data) not in ({'identity'}, {'identity', 'dance'}) or type(data.get('dance', False)) is not bool:
+                    if set(data) not in ({'identity'}, {'identity', 'dance'}, {'identity', 'dance', 'invite_only'}) or type(data.get('dance', False)) is not bool or type(data.get('invite_only', False)) is not bool:
                         raise ValueError('Invalid message')
-                    return self.reply(200, dict(token=links.register(data['identity'], data.get('dance', False))))
+                    return self.reply(200, dict(token=links.register(data['identity'], data.get('dance', False), data.get('invite_only', False))))
                 if set(data) not in ({'action', 'target', 'invitation'}, {'action', 'target', 'invitation', 'offer'}) or not all(isinstance(data[k], str) for k in ('action', 'target', 'invitation')):
                     raise ValueError('Invalid message')
                 return self.reply(200, links.action(self.token(), **data))

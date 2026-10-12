@@ -19,6 +19,7 @@ internal sealed unsafe class PairAlignment : IDisposable
     private float bestDistance;
     private bool correcting;
     private bool finalCorrection;
+    private bool dance;
     private int correctionFrames, stableFrames, acceptableFrames;
     private readonly List<string> samples = [];
     private long started;
@@ -51,6 +52,7 @@ internal sealed unsafe class PairAlignment : IDisposable
         if (objects.LocalPlayer is not { } player || !PairRules.WithinApproachRange(player.Position, point, dance ? 12 : 10))
             throw new InvalidOperationException("Move within 10 yalms on the same level first.");
         destination = point;
+        this.dance = dance;
         facing = rotation;
         expires = Environment.TickCount64 + 8000;
         lastProgress = Environment.TickCount64;
@@ -66,11 +68,13 @@ internal sealed unsafe class PairAlignment : IDisposable
         Sample("begin");
     }
 
-    public void BeginFinalCorrection(Vector3 point, float rotation)
+    public void BeginFinalCorrection(Vector3 point, float rotation, bool dance = false)
     {
+        if (objects.LocalPlayer is { } groundedPlayer)
+            point = PairRules.GroundedDestination(point, groundedPlayer.Position, dance);
         if (objects.LocalPlayer is not { } player || !PairRules.CanFineCorrect(player.Position, point, rotation))
             throw new InvalidOperationException("Final correction exceeds 0.10 yalms or has invalid coordinates.");
-        Begin(point, rotation);
+        Begin(point, rotation, dance);
         finalCorrection = correcting = true;
         correctionStarted = started;
         expires = started + 1200;
@@ -134,6 +138,9 @@ internal sealed unsafe class PairAlignment : IDisposable
         var distance = new Vector2(delta.X, delta.Z).Length();
         if (distance <= .03f)
         {
+            // Side-by-side dancers stand on separate ground samples. Do not pull
+            // either actor vertically to the other actor's floor height.
+            destination = PairRules.GroundedDestination(destination, player.Position, dance);
             if (Vector3.Distance(player.Position, destination) > .05f)
             { Fail("Too much height difference for fine alignment."); return; }
             correcting = true;

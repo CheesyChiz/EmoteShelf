@@ -7,6 +7,20 @@ from reports import Reports, validate
 
 
 class ReportTests(unittest.TestCase):
+    def test_playback_context_is_bounded_and_excludes_free_text(self):
+        context = dict(PairState='paired', Anchor=True, AlignStarted=False, PreparationStarted=True,
+                       Preparing=True, Ready=False, StableFrames=0, ResourceStatus='none',
+                       LocalAssets=0, PeerAssets=0, LocalVerified=False, PeerVerified=False, SyncHttpStatus=0,
+                       ActorMode=1, EmoteId=219, Emoting=True, StationaryDance=True,
+                       HeightDelta=-.05, SoundFailure='idle_timeout')
+        data = dict(self.data, attempt='b'*64, context=context)
+        self.assertTrue(self.store.add(data, 'test-ip'))
+        with self.store.connect() as db:
+            self.assertEqual(json.loads(db.execute('SELECT payload FROM reports').fetchone()[0])['context'], context)
+        for change in (dict(ActorMode=256), dict(EmoteId=-1), dict(Emoting=1),
+                       dict(HeightDelta=float('nan')), dict(SoundFailure='private path'), dict(Log='private log')):
+            with self.assertRaises(ValueError): validate(dict(data, context=dict(context, **change)))
+
     def test_import_failure_stage_and_kind(self):
         validate(dict(self.data, code='transfer_failed', detail='import_collections_index'))
         with self.assertRaises(ValueError):

@@ -114,6 +114,10 @@ class Transfers:
                                 raise ValueError('transfer_launch_invalid')
                             sender, receiver = links.users[item['sender']], links.users[item['receiver']]
                             dance = launch.get('Dance', False)
+                            stationary = launch.get('InviteOnly', False)
+                            if type(stationary) is not bool or (stationary and not
+                                    (dance and sender.get('invite_only') and receiver.get('invite_only'))):
+                                raise ValueError('transfer_launch_invalid')
                             if type(dance) is not bool or (dance and (
                                     not sender.get('dance') or not receiver.get('dance') or
                                     not isinstance(launch.get('Command'), str) or
@@ -123,7 +127,7 @@ class Transfers:
                                 raise ValueError('transfer_busy')
                             sender['offer'] = receiver['offer'] = dict(id=fields[0], family=fields[1],
                                 command=fields[2], role=fields[3], sender=item['sender'],
-                                status='accepted', until=self.clock()+60, dance=dance)
+                                status='accepted', until=self.clock()+60, dance=dance, invite_only=stationary)
                     self.terminal_receipts[token] = (key, self.clock()+self.TTL, action, peer)
                     self.finish(key, {'complete': 'completed', 'reject': 'declined', 'cancel': 'cancelled', 'fail': 'installation_failed'}[action])
                 elif action == 'upload' and not incoming and item['state'] == 'accepted' and set(data) == {'action', 'id', 'offset', 'chunk'}:

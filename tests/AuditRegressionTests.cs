@@ -4,6 +4,18 @@ internal static class AuditRegressionTests
 {
     internal static void Run()
     {
+        var danceTarget = PairRules.DancePosition(System.Numerics.Vector3.Zero, 0);
+        var dancer = new System.Numerics.Vector3(2.00161f, .05f, -.00013f);
+        var grounded = PairRules.GroundedDestination(danceTarget, dancer, true);
+        if (grounded.Y != dancer.Y || grounded.X != danceTarget.X || grounded.Z != danceTarget.Z ||
+            !PairRules.ReadyToLaunch(dancer, 0, grounded, 0) ||
+            PairRules.GroundedDestination(danceTarget, dancer, false) != danceTarget ||
+            PairRules.ReadyToLaunch(dancer, 1.22f, grounded, 0))
+            throw new Exception("Dance slope handling must preserve spacing, facing and ordinary pair geometry");
+        var highDancer = new System.Numerics.Vector3(2, .3f, 0);
+        if (PairRules.ReadyToLaunch(highDancer, 0,
+            PairRules.GroundedDestination(danceTarget, highDancer, true), 0))
+            throw new Exception("Dance slope handling must reject large height differences");
         foreach (var dance in new[] { false, true })
             if (!PairRules.NearbyForMode(System.Numerics.Vector3.Zero, new(10, 0, 0), dance) ||
                 PairRules.NearbyForMode(System.Numerics.Vector3.Zero, new(10.01f, 0, 0), dance) ||

@@ -7,15 +7,17 @@ using System.Text.Json.Serialization;
 
 namespace EmoteShelf;
 
+// invite_only is the wire flag for synchronized stationary dance, not independent playback.
 public sealed record LaunchOffer(
     [property: JsonPropertyName("id")] string Id,
     [property: JsonPropertyName("family")] string Family,
     [property: JsonPropertyName("command")] string Command,
     [property: JsonPropertyName("role")] string Role,
     [property: JsonPropertyName("dance")] bool Dance = false,
-    [property: JsonPropertyName("options")] Dictionary<string, List<string>>? Options = null);
+    [property: JsonPropertyName("options")] Dictionary<string, List<string>>? Options = null,
+    [property: JsonPropertyName("invite_only"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool InviteOnly = false);
 public sealed record LaunchInvitation(LaunchOffer Offer, bool Incoming, string Status, int Remaining, string Previous = "", bool MissingMod = false);
-public sealed record LinkSnapshot(string State, string Partner, string Invitation, int Remaining, long ReceivedAt, string Error = "", LaunchInvitation? Launch = null, bool CurrentPeer = false);
+public sealed record LinkSnapshot(string State, string Partner, string Invitation, int Remaining, long ReceivedAt, string Error = "", LaunchInvitation? Launch = null, bool CurrentPeer = false, bool InvitationPeer = false);
 
 // Only immutable snapshots cross into the framework/UI thread.
 public sealed class LinkClient : IDisposable
@@ -71,7 +73,7 @@ public sealed class LinkClient : IDisposable
         try
         {
             Trace("register start");
-            token = (await Send("v2/connect", null, new { identity = Identity, dance = true }, stop.Token)).GetProperty("token").GetString();
+            token = (await Send("v2/connect", null, new { identity = Identity, dance = true, invite_only = true }, stop.Token)).GetProperty("token").GetString();
             if (token is null || token.Length != 43 || token.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-' && c != '_'))
                 throw new InvalidOperationException("Invalid relay response");
             Trace("register accepted");
@@ -113,7 +115,8 @@ public sealed class LinkClient : IDisposable
                 }
                 Volatile.Write(ref snapshot, new(state, partner, data.GetProperty("invitation").GetString() ?? "",
                     data.GetProperty("remaining").GetInt32(), Environment.TickCount64, error, launch,
-                    data.TryGetProperty("current_peer", out var currentPeer) && currentPeer.ValueKind == JsonValueKind.True));
+                    data.TryGetProperty("current_peer", out var currentPeer) && currentPeer.ValueKind == JsonValueKind.True,
+                    data.TryGetProperty("invitation_peer", out var invitationPeer) && invitationPeer.ValueKind == JsonValueKind.True));
                 var stateKey = state + "/" + (launch?.Status ?? "none");
                 if (stateKey != previousState || stage != "poll")
                     Trace($"response action={stage} state={stateKey} elapsedMs={Environment.TickCount64 - sentAt}");

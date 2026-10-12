@@ -43,7 +43,7 @@ class LinkStore:
             elif item['offer'] and self.clock() >= item['offer']['until']:
                 self.clear_offer(token)
 
-    def register(self, identity, dance=False):
+    def register(self, identity, dance=False, invite_only=False):
         if not isinstance(identity, str) or not re.fullmatch('[0-9a-f]{64}', identity):
             raise ValueError('Invalid identity')
         with self.lock:
@@ -51,7 +51,7 @@ class LinkStore:
             if len(self.users) >= 512 or any(u['identity'] == identity for u in self.users.values()):
                 raise ValueError('Already connected or busy')
             token = secrets.token_urlsafe(32)
-            self.users[token] = dict(identity=identity, dance=dance, seen=self.clock(), peer=None,
+            self.users[token] = dict(identity=identity, dance=dance, invite_only=invite_only is True, seen=self.clock(), peer=None,
                                     pending=None, incoming=False, invitation='', until=0, next_invite=0, offer=None)
             return token
 
@@ -71,16 +71,19 @@ class LinkStore:
                     raise ValueError('Playback agreement expired')
                 item['offer'] = peer['offer'] = dict(id=secrets.token_hex(32), family=previous['family'],
                     command=previous['command'], role=previous['role'], previous=previous['id'],
-                    dance=previous.get('dance', False), options=previous.get('options'),
+                    dance=previous.get('dance', False), options=previous.get('options'), invite_only=previous.get('invite_only', False),
                     sender=token, status='accepted', until=self.clock()+60)
             elif action == 'propose':
                 peer = self.users.get(item['peer'])
                 if not peer or item['offer'] or peer['offer']:
                     raise ValueError('Launch already pending or not linked')
-                if not isinstance(offer, dict) or not {'id', 'family', 'command', 'role'} <= set(offer) or set(offer) - {'id', 'family', 'command', 'role', 'dance', 'options'} or not all(isinstance(offer.get(k), str) and re.fullmatch('[0-9a-f]{64}', offer[k]) for k in ('id', 'family', 'command', 'role')):
+                if not isinstance(offer, dict) or not {'id', 'family', 'command', 'role'} <= set(offer) or set(offer) - {'id', 'family', 'command', 'role', 'dance', 'options', 'invite_only'} or not all(isinstance(offer.get(k), str) and re.fullmatch('[0-9a-f]{64}', offer[k]) for k in ('id', 'family', 'command', 'role')):
                     raise ValueError('Invalid proposal')
                 if type(offer.get('dance', False)) is not bool:
                     raise ValueError('Invalid dance mode')
+                if type(offer.get('invite_only', False)) is not bool or (offer.get('invite_only') and
+                        not (offer.get('dance') and item.get('invite_only') and peer.get('invite_only'))):
+                    raise ValueError('Both clients must support dance invitations')
                 if offer.get('dance') and not (item.get('dance') and peer.get('dance')):
                     raise ValueError('Both clients must support shared dance')
                 options = offer.get('options')
@@ -116,7 +119,7 @@ class LinkStore:
                     current.setdefault('finished', set()).add(token)
                     if len(current['finished']) == 2:
                         replay = {k: current[k] for k in ('id', 'family', 'command', 'role')}
-                        replay.update(dance=current.get('dance', False), options=current.get('options'))
+                        replay.update(dance=current.get('dance', False), options=current.get('options'), invite_only=current.get('invite_only', False))
                         replay['at'] = self.clock()
                         item['replay'] = self.users[item['peer']]['replay'] = replay
                         self.clear_offer(token)
@@ -156,8 +159,8 @@ class LinkStore:
             state = 'linked' if item['peer'] else ('incoming' if item['incoming'] else 'outgoing') if peer else 'idle'
             current = item['offer']
             launch = dict(id=current['id'], family=current['family'], command=current['command'], role=current['role'],
-                          dance=current.get('dance', False), options=current.get('options'),
+                          dance=current.get('dance', False), options=current.get('options'), invite_only=current.get('invite_only', False),
                           incoming=current['sender'] != token, status=current['status'], remaining=max(0, int(current['until']-self.clock())),
                           previous=current.get('previous', ''), missing_mod=current.get('missing_mod', False)) if current else None
-            return dict(state=state, partner=peer['identity'] if peer else '', invitation=item['invitation'], current_peer=bool(peer and peer.get('dance')),
+            return dict(state=state, partner=peer['identity'] if peer else '', invitation=item['invitation'], current_peer=bool(peer and peer.get('dance')), invitation_peer=bool(peer and peer.get('invite_only')),
                         remaining=max(0, int(item['until']-self.clock())) if item['pending'] else 0, launch=launch)
