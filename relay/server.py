@@ -39,8 +39,8 @@ class PairStore:
             if item['expires'] <= now or now - item['seen'] > lease:
                 self.cancel_locked(token)
 
-    def ready(self, identity, target, animation, align=False):
-        if not all(isinstance(v, str) and HEX.fullmatch(v) for v in (identity, target, animation)) or identity == target or not isinstance(align, bool):
+    def ready(self, identity, target, animation, align=False, stop_barrier=False):
+        if not all(isinstance(v, str) and HEX.fullmatch(v) for v in (identity, target, animation)) or identity == target or not isinstance(align, bool) or type(stop_barrier) is not bool:
             raise ValueError('Invalid pair identifiers')
         with self.lock:
             self.prune()
@@ -52,7 +52,7 @@ class PairStore:
             token = secrets.token_urlsafe(32)
             item = dict(self=identity, target=target, animation=animation, align=align,
                         expires=self.clock() + 60, seen=self.clock(), status='waiting',
-                        prepared=False, start=0, peer=None)
+                        prepared=False, stopped=False, stop_barrier=stop_barrier, start=0, peer=None)
             self.sessions[token] = item
             for other_token, other in self.sessions.items():
                 if other_token != token and other['status'] == 'waiting' and other['self'] == target and other['target'] == identity and other['animation'] == animation:
@@ -70,7 +70,18 @@ class PairStore:
             item['seen'] = self.clock()
             peer = self.sessions.get(item['peer'])
             return dict(status=item['status'], delay_ms=max(0, round((item['start'] - self.clock()) * 1000)),
-                        align=bool(peer and item['align'] and peer['align']), anchor=item['self'] < item['target'])
+                        align=bool(peer and item['align'] and peer['align']), anchor=item['self'] < item['target'],
+                        stop_barrier=bool(peer and item['stop_barrier'] and peer['stop_barrier']),
+                        stopped=bool(peer and item['stopped'] and peer['stopped']))
+
+    def stopped(self, token):
+        with self.lock:
+            self.prune()
+            item = self.sessions.get(token)
+            peer = self.sessions.get(item['peer']) if item else None
+            if not item or item['status'] != 'paired' or not peer or not (item['stop_barrier'] and peer['stop_barrier']):
+                raise ValueError('Stop barrier unavailable')
+            item.update(stopped=True, seen=self.clock())
 
     def prepared(self, token):
         with self.lock:
@@ -78,9 +89,12 @@ class PairStore:
             item = self.sessions.get(token)
             if not item or item['status'] not in ('paired', 'scheduled'):
                 raise ValueError('Pair is not ready')
+            peer = self.sessions.get(item['peer'])
+            if (item['stop_barrier'] or (peer and peer['stop_barrier'])) and not (
+                    peer and item['stop_barrier'] and peer['stop_barrier'] and item['stopped'] and peer['stopped']):
+                raise ValueError('Both clients must finish stopping')
             item['seen'] = self.clock()
             item['prepared'] = True
-            peer = self.sessions.get(item['peer'])
             if peer and peer['prepared'] and item['status'] == 'paired':
                 start = self.clock() + 2
                 item.update(status='scheduled', start=start)
@@ -208,8 +222,8 @@ class Handler(BaseHTTPRequestHandler):
                 if set(data) not in ({'action', 'target', 'invitation'}, {'action', 'target', 'invitation', 'offer'}) or not all(isinstance(data[k], str) for k in ('action', 'target', 'invitation')):
                     raise ValueError('Invalid message')
                 return self.reply(200, links.action(self.token(), **data))
-            if self.path in ('/v1/prepared', '/v1/finished'):
-                action = store.prepared if self.path.endswith('prepared') else store.finished
+            if self.path in ('/v1/prepared', '/v1/finished', '/v1/stopped'):
+                action = {'/v1/prepared': store.prepared, '/v1/finished': store.finished, '/v1/stopped': store.stopped}[self.path]
                 action(self.token())
                 return self.reply(200, dict(ok=True))
             if self.path != '/v1/ready':
@@ -218,9 +232,9 @@ class Handler(BaseHTTPRequestHandler):
             if not 0 < length <= 1024:
                 return self.reply(413, dict(error='Invalid body size'))
             data = json.loads(self.rfile.read(length))
-            if not isinstance(data, dict) or set(data) != {'self', 'target', 'animation', 'align'}:
+            if not isinstance(data, dict) or set(data) not in ({'self', 'target', 'animation', 'align'}, {'self', 'target', 'animation', 'align', 'stop_barrier'}):
                 raise ValueError('Invalid message')
-            token = store.ready(data['self'], data['target'], data['animation'], data['align'])
+            token = store.ready(data['self'], data['target'], data['animation'], data['align'], data.get('stop_barrier', False))
             self.reply(200, dict(token=token))
         except (ValueError, TypeError, KeyError):
             self.reply(400, dict(error='Invalid request or unavailable pair'))

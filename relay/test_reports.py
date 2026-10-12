@@ -14,6 +14,8 @@ class ReportTests(unittest.TestCase):
                        ActorMode=1, EmoteId=219, Emoting=True, StationaryDance=True,
                        HeightDelta=-.05, SoundFailure='idle_timeout')
         data = dict(self.data, attempt='b'*64, context=context)
+        for reason in ('actor', 'manual', 'timeout', 'position', 'distance', 'height'):
+            validate(dict(data, context=dict(context, SoundFailure='motion_' + reason)))
         self.assertTrue(self.store.add(data, 'test-ip'))
         with self.store.connect() as db:
             self.assertEqual(json.loads(db.execute('SELECT payload FROM reports').fetchone()[0])['context'], context)

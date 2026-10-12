@@ -45,7 +45,8 @@ def validate(data):
             height = context['HeightDelta']
             if height is not None and (type(height) not in (int, float) or not math.isfinite(height) or abs(height) > 100):
                 raise ValueError('height delta')
-            if context['SoundFailure'] not in {'none', 'idle_timeout', 'redraw_timeout', 'state'}:
+            if context['SoundFailure'] not in {'none', 'idle_timeout', 'redraw_timeout', 'state',
+                    'motion_actor', 'motion_manual', 'motion_timeout', 'motion_position', 'motion_distance', 'motion_height'}:
                 raise ValueError('sound failure')
         if 'ResourceStatus' in context:
             if context['ResourceStatus'] not in {'none', 'transport', 'mismatch', 'unavailable', 'local_pending', 'peer_missing', 'peer_pending', 'verified'}:

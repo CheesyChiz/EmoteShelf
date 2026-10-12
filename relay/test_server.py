@@ -41,6 +41,42 @@ class Tests(unittest.TestCase):
         self.s.prepared(a)
         self.assertEqual(self.s.get(a)['delay_ms'], 1000)
 
+    def test_stop_barrier_waits_for_slower_client(self):
+        a = self.s.ready('a'*64, 'b'*64, 'c'*64, True, True)
+        b = self.s.ready('b'*64, 'a'*64, 'c'*64, True, True)
+        self.s.stopped(a)
+        self.s.stopped(a)  # Retry is idempotent.
+        self.assertFalse(self.s.get(a)['stopped'])
+        self.assertFalse(self.s.get(b)['stopped'])
+        with self.assertRaises(ValueError): self.s.prepared(a)
+        self.now += 1
+        self.s.stopped(b)
+        self.assertTrue(self.s.get(a)['stopped'])
+        self.assertTrue(self.s.get(b)['stopped'])
+        self.s.prepared(a)
+        self.assertEqual(self.s.get(b)['status'], 'paired')
+        self.s.prepared(b)
+        self.assertEqual(self.s.get(a)['status'], 'scheduled')
+
+    def test_mixed_versions_cannot_bypass_stop_barrier(self):
+        a = self.s.ready('a'*64, 'b'*64, 'c'*64, True, True)
+        b = self.s.ready('b'*64, 'a'*64, 'c'*64, True)
+        self.assertFalse(self.s.get(a)['stop_barrier'])
+        for token in (a, b):
+            with self.assertRaises(ValueError): self.s.prepared(token)
+            with self.assertRaises(ValueError): self.s.stopped(token)
+
+    def test_stop_barrier_cancel_and_new_attempt(self):
+        a = self.s.ready('a'*64, 'b'*64, 'c'*64, True, True)
+        b = self.s.ready('b'*64, 'a'*64, 'c'*64, True, True)
+        self.s.stopped(a)
+        self.s.cancel(a)
+        with self.assertRaises(ValueError): self.s.stopped(b)
+        self.s.cancel(b)
+        a = self.s.ready('a'*64, 'b'*64, 'c'*64, True, True)
+        b = self.s.ready('b'*64, 'a'*64, 'c'*64, True, True)
+        self.assertFalse(self.s.get(a)['stopped'])
+
     def test_mutual_alignment_only(self):
         a, b = self.pair(False)
         self.assertFalse(self.s.get(a)['align'])

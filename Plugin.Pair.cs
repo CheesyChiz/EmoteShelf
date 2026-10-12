@@ -342,6 +342,11 @@ public sealed partial class Plugin
                 if (!StopAcceptedPairEmote(local, target, now)) return;
             }
             pairCheckpoint = "alignment";
+            // Do not approach or prepare resources until BOTH local stop gates
+            // are acknowledged. The other client may still be restoring its pulse.
+            if (!pairStartedPreparation && !SoundEmoteIsIdle())
+                throw new InvalidOperationException("Previous emote resumed before preparation.");
+            if (!snapshot.Stopped) return;
             if (pairAlignment?.Error.Length > 0 && pairAlignStarted) throw new InvalidOperationException(pairAlignment.Error);
             var mayApproach = snapshot.Align && !snapshot.Anchor &&
                 ((pairAlignStarted && !pairStartedPreparation) || pairRefining);

@@ -498,7 +498,9 @@ public sealed partial class Plugin : IDalamudPlugin
                 {
                     pendingCommand = ""; pendingPoseIndex = -1;
                     soundFailure = ex.Message == "sound_restart_idle_timeout" ? "idle_timeout"
-                        : ex.Message == "sound_restart_redraw_timeout" ? "redraw_timeout" : "state";
+                        : ex.Message == "sound_restart_redraw_timeout" ? "redraw_timeout"
+                        : ex.Message == "sound_stop_motion_failed" && pairAlignment?.EmoteStopFailed == true
+                            ? "motion_" + pairAlignment.EmoteStopFailure : "state";
                     soundRestart.Reset();
                     pairAlignment?.Cancel();
                     applySoundSettings = null;

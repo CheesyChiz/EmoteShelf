@@ -15,6 +15,9 @@ internal static class PairClientTests
         using var b = new PairClient(target, self, family, false);
         try { await Until(() => a.Snapshot.State == "paired" && b.Snapshot.State == "paired"); }
         catch { throw new Exception($"Live relay readiness failed: A={a.Snapshot.State} {a.Snapshot.Error}; B={b.Snapshot.State} {b.Snapshot.Error}"); }
+        a.Stopped(); b.Stopped();
+        try { await Until(() => a.Snapshot.Stopped && b.Snapshot.Stopped); }
+        catch { throw new Exception($"Live stop barrier failed: A={a.Snapshot.State} {a.Snapshot.Error}; B={b.Snapshot.State} {b.Snapshot.Error}"); }
         a.Prepared(); b.Prepared();
         try { await Until(() => a.Snapshot.State == "scheduled" && b.Snapshot.State == "scheduled"); }
         catch { throw new Exception($"Live relay scheduling failed: A={a.Snapshot.State} {a.Snapshot.Error}; B={b.Snapshot.State} {b.Snapshot.Error}"); }
@@ -34,6 +37,11 @@ internal static class PairClientTests
         using var a = new PairClient(new('a', 64), new('b', 64), new('c', 64), true, new FakeHandler(relay));
         using var b = new PairClient(new('b', 64), new('a', 64), new('c', 64), true, new FakeHandler(relay));
         await Until(() => a.Snapshot.State == "paired" && b.Snapshot.State == "paired");
+        a.Stopped();
+        await Task.Delay(300);
+        if (a.Snapshot.Stopped || b.Snapshot.Stopped) throw new Exception("Released before slower client stopped.");
+        b.Stopped();
+        await Until(() => a.Snapshot.Stopped && b.Snapshot.Stopped);
         a.Prepared();
         await Task.Delay(200);
         if (a.Snapshot.State != "paired") throw new Exception("Started without both clients prepared.");
@@ -81,6 +89,7 @@ internal static class PairClientTests
         public int Tokens, Finished, Deleted;
         public bool HeadersOnly = true, UnexpectedStart;
         public readonly HashSet<string> Prepared = [];
+        public readonly HashSet<string> Stopped = [];
         public long StartAt;
     }
 
@@ -102,14 +111,17 @@ internal static class PairClientTests
                 {
                     relay.HeadersOnly &= token?.Length == 43 && !path.Contains(token);
                     if (request.Method == HttpMethod.Delete) relay.Deleted++;
+                    else if (path == "/v1/stopped") relay.Stopped.Add(token!);
                     else if (path == "/v1/prepared")
                     {
+                        if (relay.Stopped.Count != 2) throw new Exception("Preparation bypassed stop barrier");
                         relay.Prepared.Add(token!);
                         if (relay.Prepared.Count == 2 && relay.StartAt == 0) relay.StartAt = Environment.TickCount64 + 700;
                     }
                     else if (path == "/v1/finished") relay.Finished++;
                     else body = new { status = relay.StartAt > 0 || relay.UnexpectedStart ? "scheduled" : "paired",
-                        delay_ms = (int)Math.Max(0, relay.StartAt - Environment.TickCount64), align = true, anchor = token![0] == 'a' };
+                        delay_ms = (int)Math.Max(0, relay.StartAt - Environment.TickCount64), align = true, anchor = token![0] == 'a',
+                        stop_barrier = true, stopped = relay.Stopped.Count == 2 };
                 }
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 { Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json") });

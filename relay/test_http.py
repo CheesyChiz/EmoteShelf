@@ -40,6 +40,30 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.request('GET', '/v1/session/' + 'x'*43)[0], 404)
         self.assertEqual(self.request('GET', '/v1/session', token='x'*43)[0], 404)
 
+    def test_stop_barrier_over_http(self):
+        server.rates.clear()
+        tokens = []
+        try:
+            for identity, target in [('6', '7'), ('7', '6')]:
+                status, body = self.request('POST', '/v1/ready', dict(
+                    self=identity*64, target=target*64, animation='8'*64,
+                    align=True, stop_barrier=True))
+                self.assertEqual(status, 200)
+                tokens.append(body['token'])
+            a, b = tokens
+            self.assertEqual(self.request('POST', '/v1/stopped')[0], 400)
+            self.assertEqual(self.request('POST', '/v1/stopped', token=a)[0], 200)
+            self.assertFalse(self.request('GET', '/v1/session', token=a)[1]['stopped'])
+            self.assertEqual(self.request('POST', '/v1/prepared', token=a)[0], 400)
+            self.assertEqual(self.request('POST', '/v1/stopped', token=b)[0], 200)
+            self.assertTrue(self.request('GET', '/v1/session', token=a)[1]['stopped'])
+            for token in tokens:
+                self.assertEqual(self.request('POST', '/v1/prepared', token=token)[0], 200)
+            self.assertEqual(self.request('GET', '/v1/session', token=b)[1]['status'], 'scheduled')
+        finally:
+            for token in tokens: server.store.cancel(token)
+            server.rates.clear()
+
     def test_v7_streams_over_http_before_upload_finishes(self):
         server.rates.clear()
         a = server.links.register('d' * 64)

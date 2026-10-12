@@ -28,15 +28,17 @@ public sealed partial class Plugin
         if (soundStopNudged && pairAlignment?.EmoteStopFailed == true)
         {
             Log.Warning("Emote stop motion failed: {Reason}", pairAlignment.EmoteStopFailure);
-            soundFailure = "state"; throw new InvalidOperationException("sound_stop_motion_failed");
+            soundFailure = "motion_" + pairAlignment.EmoteStopFailure;
+            throw new InvalidOperationException("sound_stop_motion_failed");
         }
         if (!soundStopNudged && CanPair(local) && IsPlayingEmote()) BeginSoundStopMotion();
         if (pairAlignment?.StoppingEmote != true &&
             (System.Numerics.Vector3.Distance(local.Position, pairOrigin) > .08f ||
              PairRules.AngleDistance(local.Rotation, pairFacing) > .08f))
             throw new InvalidOperationException("Local movement interrupted emote stopping.");
-        var idle = pairAlignment?.StoppingEmote != true && SoundEmoteIsIdle() &&
-                   CanPair(peer) && !ActorEmoting(peer);
+        // A local observation of the peer cannot acknowledge its completed
+        // restoration. Each client confirms itself through the relay barrier.
+        var idle = pairAlignment?.StoppingEmote != true && SoundEmoteIsIdle();
         if (!pairStopGate.ObserveIdle(now, idle))
         {
             if (pairStopGate.Stage == SoundRestart.State.Failed)
@@ -48,9 +50,7 @@ public sealed partial class Plugin
             return false;
         }
         pairStopComplete = true;
-        if (System.Numerics.Vector3.Distance(peer.Position, pairTargetOrigin) > .1f ||
-            PairRules.AngleDistance(peer.Rotation, pairTargetFacing) > .08f)
-            throw new InvalidOperationException("Partner moved while stopping the previous emote.");
+        pairSession!.Stopped();
         pairStopGate.Reset();
         pairOrigin = local.Position; pairFacing = local.Rotation;
         pairTargetOrigin = peer.Position; pairTargetFacing = peer.Rotation;

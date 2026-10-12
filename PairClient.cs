@@ -6,7 +6,7 @@ using System.Collections.Concurrent;
 
 namespace EmoteShelf;
 
-public sealed record PairSnapshot(string State, bool Align, bool Anchor, long StartAt, long ReceivedAt, string Error = "");
+public sealed record PairSnapshot(string State, bool Align, bool Anchor, long StartAt, long ReceivedAt, string Error = "", bool Stopped = false);
 
 // No game API on the networking thread. Plugin.Update consumes immutable snapshots.
 public sealed class PairClient : IDisposable
@@ -15,6 +15,7 @@ public sealed class PairClient : IDisposable
     private readonly CancellationTokenSource stop = new();
     private PairSnapshot snapshot = new("connecting", false, false, 0, Environment.TickCount64);
     private int prepared;
+    private int stopped;
     private int completed;
     private readonly Task worker;
     public PairSnapshot Snapshot => Volatile.Read(ref snapshot);
@@ -38,6 +39,7 @@ public sealed class PairClient : IDisposable
     }
 
     public void Prepared() => Interlocked.Exchange(ref prepared, 1);
+    public void Stopped() => Interlocked.Exchange(ref stopped, 1);
     public void Complete() => Interlocked.Exchange(ref completed, 1);
     public void Dispose() => stop.Cancel();
 
@@ -59,6 +61,7 @@ public sealed class PairClient : IDisposable
     {
         string? token = null;
         var sentPrepared = false;
+        var sentStopped = false;
         long startAt = 0;
         var deadline = Environment.TickCount64 + 60000;
         var checkpoint = "register";
@@ -66,13 +69,19 @@ public sealed class PairClient : IDisposable
         try
         {
             Diagnostic("pair register start");
-            var ready = await Send(HttpMethod.Post, "v1/ready", null, new { self, target, animation = family, align }, stop.Token).ConfigureAwait(false);
+            var ready = await Send(HttpMethod.Post, "v1/ready", null, new { self, target, animation = family, align, stop_barrier = true }, stop.Token).ConfigureAwait(false);
             token = ready.GetProperty("token").GetString();
             if (token is null || token.Length != 43 || token.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '-' && c != '_'))
                 throw new InvalidOperationException("Invalid relay response.");
             while (!stop.IsCancellationRequested && Volatile.Read(ref completed) == 0)
             {
                 if (Environment.TickCount64 >= deadline) throw new TimeoutException("Pair readiness expired.");
+                if (Volatile.Read(ref stopped) != 0 && !sentStopped)
+                {
+                    checkpoint = "stopped";
+                    await Send(HttpMethod.Post, "v1/stopped", token, null, stop.Token).ConfigureAwait(false);
+                    sentStopped = true;
+                }
                 if (Volatile.Read(ref prepared) != 0 && !sentPrepared)
                 {
                     checkpoint = "prepared";
@@ -91,10 +100,13 @@ public sealed class PairClient : IDisposable
                     lastState = name;
                 }
                 if (name is not ("waiting" or "paired" or "scheduled")) throw new InvalidOperationException("The pair was cancelled or expired.");
+                if (name != "waiting" && (!state.TryGetProperty("stop_barrier", out var barrier) || !barrier.GetBoolean()))
+                    throw new InvalidOperationException("Update both plugins before launching together.");
+                var bothStopped = sentStopped && state.TryGetProperty("stopped", out var stoppedState) && stoppedState.GetBoolean();
                 if (name == "scheduled")
                 {
                     checkpoint = "schedule";
-                    if (!sentPrepared) throw new InvalidOperationException("Unexpected start before local preparation.");
+                    if (!sentPrepared || !bothStopped) throw new InvalidOperationException("Unexpected start before local preparation.");
                     if (startAt == 0)
                     {
                         // A slow first sample is not a clock measurement. Try the next
@@ -108,7 +120,7 @@ public sealed class PairClient : IDisposable
                     // recalculate it. Framework checks heartbeat age before executing.
                 }
                 Volatile.Write(ref snapshot, new PairSnapshot(name, state.GetProperty("align").GetBoolean(),
-                    state.GetProperty("anchor").GetBoolean(), startAt, sent + (received - sent) / 2));
+                    state.GetProperty("anchor").GetBoolean(), startAt, sent + (received - sent) / 2, Stopped: bothStopped));
                 await Task.Delay(150, stop.Token).ConfigureAwait(false);
             }
         }
