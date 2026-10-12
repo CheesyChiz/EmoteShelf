@@ -331,7 +331,7 @@ public sealed partial class Plugin
             var mayApproach = snapshot.Align && !snapshot.Anchor &&
                 ((pairAlignStarted && !pairStartedPreparation) || pairRefining);
             pairCheckpoint = "local_movement";
-            if (!mayApproach && (Vector3.Distance(local.Position, pairOrigin) > .08f ||
+            if (!mayApproach && !(pairPreparing && pairAlignment?.StoppingEmote == true) && (Vector3.Distance(local.Position, pairOrigin) > .08f ||
                     PairRules.AngleDistance(local.Rotation, pairFacing) > .08f))
                 throw new InvalidOperationException(T("Пара отменена: ты начал двигаться или поворачиваться.", "Pair cancelled: you moved or turned."));
             if (snapshot.State is "connecting" or "waiting") return;

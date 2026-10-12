@@ -12,6 +12,26 @@ internal sealed unsafe class PairAlignment : IDisposable
     private delegate void WalkInput(nint context, float* lateral, float* forward, float* turn, byte* mode, byte* extra, byte additive);
     private readonly Hook<WalkInput> hook;
     private readonly IObjectTable objects;
+    private readonly EmoteStopMotion emoteStop = new();
+    private Func<bool>? emoteStopSafe;
+    private ulong emoteStopActor;
+    private nint emoteStopAddress;
+    public bool StoppingEmote => emoteStop.Active;
+    public bool EmoteStopFailed => emoteStop.Stage == EmoteStopMotion.State.Failed;
+
+    public void BeginEmoteStop(Func<bool> safe)
+    {
+        Cancel();
+        if (objects.LocalPlayer is not { } player || !safe())
+            throw new InvalidOperationException("sound_stop_actor_state");
+        emoteStopActor = player.GameObjectId; emoteStopAddress = player.Address;
+        emoteStopSafe = safe;
+        emoteStop.Begin(player.Position, player.Rotation, Environment.TickCount64);
+    }
+
+    private bool SafeEmoteStop()
+        => objects.LocalPlayer is { } player && player.GameObjectId == emoteStopActor &&
+           player.Address == emoteStopAddress && emoteStopSafe?.Invoke() == true;
     private Vector3 destination;
     private float facing;
     private long expires;
@@ -81,12 +101,24 @@ internal sealed unsafe class PairAlignment : IDisposable
         Sample("post-prepare-refinement");
     }
 
-    public void Cancel() { if (Active) Sample("cancel"); Active = false; Arrived = false; correcting = false; }
+    public void Cancel() { if (Active) Sample("cancel"); Active = false; Arrived = false; correcting = false; emoteStop.Cancel(); emoteStopSafe = null; }
 
     // Once per framework frame, not per input-hook invocation. Require observed
     // stability on subsequent frames; a position write itself is not confirmation.
     public void Update()
     {
+        if (emoteStop.Active)
+        {
+            var stopPlayer = objects.LocalPlayer;
+            if (!emoteStop.Validate(stopPlayer?.Position ?? new Vector3(float.NaN), Environment.TickCount64, SafeEmoteStop(), false)) return;
+            if (emoteStop.Restore(stopPlayer!.Position, stopPlayer.Rotation, Environment.TickCount64))
+            {
+                var stopActor = (Character*)stopPlayer.Address;
+                stopActor->GameObject.SetPosition(emoteStop.Origin.X, emoteStop.Origin.Y, emoteStop.Origin.Z);
+                stopActor->GameObject.SetRotation(emoteStop.Facing);
+            }
+            return;
+        }
         if (!Active || !correcting) return;
         if (objects.LocalPlayer is not { } player)
         { Fail("Alignment confirmation timed out."); return; }
@@ -120,6 +152,21 @@ internal sealed unsafe class PairAlignment : IDisposable
     private void ReadInput(nint context, float* lateral, float* forward, float* turn, byte* mode, byte* extra, byte additive)
     {
         hook.Original(context, lateral, forward, turn, mode, extra, additive);
+        if (emoteStop.Active)
+        {
+            if (!emoteStop.Validate(objects.LocalPlayer?.Position ?? new Vector3(float.NaN), Environment.TickCount64,
+                SafeEmoteStop(), *lateral != 0 || *forward != 0 || *turn != 0)) return;
+            if (additive != 0 || emoteStop.Stage != EmoteStopMotion.State.Pulse) return;
+            var stopManager = CameraManager.Instance();
+            var stopCamera = stopManager == null ? null : stopManager->GetActiveCamera();
+            if (stopCamera == null) { emoteStop.Validate(Vector3.Zero, Environment.TickCount64, false, false); return; }
+            var stopYaw = ((FFXIVClientStructs.FFXIV.Client.Game.Camera*)stopCamera)->DirH + MathF.PI;
+            var relativeStop = emoteStop.Facing + MathF.PI - stopYaw;
+            *lateral = MathF.Sin(relativeStop) * .1f;
+            *forward = MathF.Cos(relativeStop) * .1f;
+            emoteStop.Pulsed(Environment.TickCount64);
+            return;
+        }
         if (!Active) return;
         if (*lateral != 0 || *forward != 0 || *turn != 0)
         {

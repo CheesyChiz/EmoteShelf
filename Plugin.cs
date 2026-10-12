@@ -238,6 +238,7 @@ public sealed partial class Plugin : IDalamudPlugin
     private void Play(Bookmark bookmark, bool pairPreparation = false)
     {
         soundFailure = "none";
+        soundStopNudged = false;
         CancelCarrierPlayback();
         RestoreOffset();
         if (!pairPreparation) lastAcceptedPair = null;
@@ -460,7 +461,12 @@ public sealed partial class Plugin : IDalamudPlugin
                     }
                     if (soundRestart.Stage == SoundRestart.State.AwaitIdle)
                     {
-                        if (!soundRestart.ObserveIdle(Environment.TickCount64, SoundEmoteIsIdle()))
+                        if (soundStopNudged && pairAlignment?.EmoteStopFailed == true)
+                            throw new InvalidOperationException("sound_stop_motion_failed");
+                        if (!soundStopNudged && IsPlayingEmote() && CanPair(soundActor))
+                            BeginSoundStopMotion();
+                        if (!soundRestart.ObserveIdle(Environment.TickCount64,
+                            pairAlignment?.StoppingEmote != true && SoundEmoteIsIdle()))
                         {
                             if (soundRestart.Stage == SoundRestart.State.Failed)
                             {
@@ -482,6 +488,7 @@ public sealed partial class Plugin : IDalamudPlugin
                     if (stage != SoundRestart.State.Ready) return;
                     Log.Information("Sound restart: redraw settled; validating prepared mod before playback");
                     soundRestart.Reset();
+                    pairAlignment?.Cancel();
                     applySoundSettings = null;
                 }
                 catch (Exception ex)
@@ -490,8 +497,9 @@ public sealed partial class Plugin : IDalamudPlugin
                     soundFailure = ex.Message == "sound_restart_idle_timeout" ? "idle_timeout"
                         : ex.Message == "sound_restart_redraw_timeout" ? "redraw_timeout" : "state";
                     soundRestart.Reset();
+                    pairAlignment?.Cancel();
                     applySoundSettings = null;
-                    status = ex.Message == "sound_restart_idle_timeout"
+                    status = ex.Message is "sound_restart_idle_timeout" or "sound_stop_motion_failed"
                         ? T("Предыдущая эмоция не завершилась. Останови её вручную и повтори запуск.", "The previous emote did not stop. Cancel it manually and retry.")
                         : T("Не удалось подтвердить перерисовку для перезапуска звука. Анимация не запущена; попробуй ещё раз.",
                             "Redraw could not be confirmed for sound restart. The animation was not started; try again.");
@@ -661,11 +669,27 @@ public sealed partial class Plugin : IDalamudPlugin
         => IsPlayingLoop() || Objects.LocalPlayer is { } player &&
             ((Character*)player.Address)->EmoteController.IsEmoting();
 
+    private bool soundStopNudged;
+    private void BeginSoundStopMotion()
+    {
+        pairAlignment ??= new PairAlignment(Interop, Objects);
+        var actorId = playbackActor;
+        var territory = playbackTerritory;
+        pairAlignment.BeginEmoteStop(() => ClientState.TerritoryType == territory &&
+            Objects.LocalPlayer is { } actor && actor.GameObjectId == actorId && CanPair(actor));
+        soundStopNudged = true;
+        Log.Information("Sound restart: one bounded movement pulse; restoring original position and facing");
+    }
+
     private unsafe void StopSoundEmote()
     {
-        // Non-loop emotes finish naturally; do not force a mode transition on them.
-        // AwaitIdle uses the game's active-emote query, not the stored emote ID.
-        if (Objects.LocalPlayer is { } normalPlayer && CanPair(normalPlayer)) return;
+        // Normal-mode emotes are interrupted through actual movement input;
+        // setting Normal again does not stop them. Never overwrite controller fields.
+        if (Objects.LocalPlayer is { } normalPlayer && CanPair(normalPlayer))
+        {
+            if (IsPlayingEmote()) BeginSoundStopMotion();
+            return;
+        }
         if (Objects.LocalPlayer is not { } player || !CanRestartActor(player))
             throw new InvalidOperationException("sound_restart_actor_state");
         // Invoke the game's state transition, never clear sound handles or write mode bytes.

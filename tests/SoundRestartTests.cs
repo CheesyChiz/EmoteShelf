@@ -4,6 +4,27 @@ internal static class SoundRestartTests
 {
     internal static void Run()
     {
+        var motion = new EmoteStopMotion();
+        var origin = new System.Numerics.Vector3(10, 5, 20);
+        motion.Begin(origin, 1, 100);
+        if (!motion.Validate(origin, 101, true, false)) throw new Exception("Stop pulse did not start");
+        motion.Pulsed(110);
+        motion.Pulsed(200); // A second hook invocation must not extend the pulse.
+        if (!motion.Restore(origin + new System.Numerics.Vector3(.02f, 0, 0), 1.1f, 120))
+            throw new Exception("Small stop displacement was not restored");
+        motion.Restore(origin, 1, 300); motion.Restore(origin, 1, 450); motion.Restore(origin, 1, 461);
+        if (motion.Stage != EmoteStopMotion.State.Complete) throw new Exception("Stop restoration was not observed stable");
+        foreach (var kind in new[] { "manual", "actor", "distance", "height", "timeout" })
+        {
+            motion.Begin(origin, 1, 100);
+            var position = origin + (kind == "distance" ? new System.Numerics.Vector3(.11f, 0, 0)
+                : kind == "height" ? new System.Numerics.Vector3(0, .04f, 0) : System.Numerics.Vector3.Zero);
+            if (motion.Validate(position, kind == "timeout" ? 1600 : 120, kind != "actor", kind == "manual") ||
+                motion.Stage != EmoteStopMotion.State.Failed || motion.Restore(origin, 1, 200))
+                throw new Exception("Unsafe stop restoration: " + kind);
+        }
+        motion.Cancel();
+        if (motion.Active) throw new Exception("Cancelled movement remained active");
         if (!SoundRestart.IsIdle(true, false, false) ||
             SoundRestart.IsIdle(true, false, true) ||
             SoundRestart.IsIdle(true, true, false) ||
