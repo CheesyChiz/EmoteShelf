@@ -175,7 +175,7 @@ public sealed partial class Plugin
             if (Objects.LocalPlayer is not { } local || LinkedPartner is not { } target || target.GameObjectId == local.GameObjectId)
                 throw new InvalidOperationException(T("Сначала пригласи партнёра через контекстное меню и дождись принятия. Партнёр должен быть рядом.", "Invite a partner through the context menu and wait for acceptance. Your partner must be nearby."));
             if (!LightlessHandles(target.Address)) throw new InvalidOperationException(T("Lightless не сообщает, что обрабатывает выбранного партнёра. Сначала установите синхронизацию в Lightless.", "Lightless does not report handling this partner. Set up synchronization in Lightless first."));
-            if ((!CanPair(local) && !(restart && CanRestartActor(local))) || (!CanPair(target) && !(restart && CanRestartActor(target))))
+            if (!CanReceivePair(local) || !CanReceivePair(target))
                 throw new InvalidOperationException(T("Сначала оба встаньте и остановите эмоции. Запуск в паре недоступен в бою, на маунте или при касте.", "Both players must stand and stop their emotes first. Pair launch is unavailable in combat, mounted or while casting."));
             if (dance && (IsPoseCommand(bookmark.Command) || bookmark.Command == "/sit"))
                 throw new InvalidOperationException(T("Для совместного танца выбери обычную эмоцию, не сидячую позу.", "Choose a regular emote for a shared dance, not a sitting pose."));
@@ -196,6 +196,7 @@ public sealed partial class Plugin
                 IconId = bookmark.IconId, PoseIndex = bookmark.PoseIndex, Offset = inviteOnly ? null : bookmark.Offset,
                 SavedOptions = bookmark.SavedOptions?.ToDictionary(x => x.Key, x => x.Value.ToList()) };
             pendingCommand = "";
+            soundRestart.Reset(); applySoundSettings = null;
             pendingPoseIndex = -1;
             waitingForStand = null;
             manualPoseBookmark = null;
@@ -262,6 +263,8 @@ public sealed partial class Plugin
             ClearPendingValidation();
         }
         pairSession = null;
+        pairStopStarted = pairStopComplete = false;
+        pairStopGate.Reset();
         pairAlignment?.Cancel();
         pairBookmark = null;
         pairHeldCommand = "";
@@ -311,7 +314,7 @@ public sealed partial class Plugin
             pairCheckpoint = "lightless_check";
             if (!LightlessHandles(target.Address)) throw new InvalidOperationException(T("Lightless больше не обрабатывает партнёра; запуск отменён.", "Lightless no longer handles the partner; launch cancelled."));
             pairCheckpoint = "actor_state";
-            if ((!CanPair(local) && !(pairRestart && CanRestartActor(local))) || (!CanPair(target) && !(pairRestart && CanRestartActor(target)) && !PairRules.PeerMayHaveStarted(snapshot.State, snapshot.StartAt, now)) ||
+            if ((!CanPair(local) && !((!pairStopComplete || pairRestart) && CanRestartActor(local))) || (!CanPair(target) && !((!pairStopComplete || pairRestart) && CanRestartActor(target)) && !PairRules.PeerMayHaveStarted(snapshot.State, snapshot.StartAt, now)) ||
                 target.IsDead || !PairRules.NearbyForMode(local.Position, target.Position, pairDance))
                 throw new InvalidOperationException(T("Пара отменена: движение, состояние или расстояние не подходят.", "Pair cancelled: character state or distance is unsuitable."));
             pairCheckpoint = "pose_setting";
@@ -326,6 +329,15 @@ public sealed partial class Plugin
             else if (pairOfferSeen || now - pairOfferQueuedAt > 5000)
                 throw new InvalidOperationException(T("Предложение отклонено, отменено или истекло.", "Animation proposal declined, cancelled or expired."));
             if (proposal?.Offer.Id != pairOfferId || proposal.Status != "accepted") return;
+            if (snapshot.State is "connecting" or "waiting") return;
+            // Consent first. Both clients stop only their own current emote before
+            // approach/preparation, regardless of whether the next mod has sound.
+            if (!pairStopComplete)
+            {
+                if (!PairRules.MayStopPreviousEmote(proposal.Status == "accepted", snapshot.State)) return;
+                pairCheckpoint = "prepare_validation";
+                if (!StopAcceptedPairEmote(local, target, now)) return;
+            }
             pairCheckpoint = "alignment";
             if (pairAlignment?.Error.Length > 0 && pairAlignStarted) throw new InvalidOperationException(pairAlignment.Error);
             var mayApproach = snapshot.Align && !snapshot.Anchor &&

@@ -4,6 +4,12 @@ internal static class SoundRestartTests
 {
     internal static void Run()
     {
+        foreach (var state in new[] { "connecting", "waiting", "paired", "scheduled", "error" })
+        {
+            if (PairRules.MayStopPreviousEmote(false, state) ||
+                PairRules.MayStopPreviousEmote(true, state) != (state == "paired"))
+                throw new Exception("Previous emotes must not be stopped before accepted pairing");
+        }
         var motion = new EmoteStopMotion();
         var origin = new System.Numerics.Vector3(10, 5, 20);
         motion.Begin(origin, 1, 100);

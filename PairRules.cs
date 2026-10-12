@@ -6,6 +6,8 @@ namespace EmoteShelf;
 
 public static class PairRules
 {
+    public static bool MayStopPreviousEmote(bool accepted, string pairState)
+        => accepted && pairState == "paired";
     public const float FinalCorrectionLimit = .10f;
     public const float LaunchDistanceTolerance = .10f;
     public static Vector3 DancePosition(Vector3 anchor, float yaw)

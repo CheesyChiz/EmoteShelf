@@ -7,6 +7,7 @@ public sealed partial class Plugin
            !Conditions[Dalamud.Game.ClientState.Conditions.ConditionFlag.Mounted] &&
            !Conditions[Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas] &&
            !Conditions[Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas51] &&
+           !Conditions[Dalamud.Game.ClientState.Conditions.ConditionFlag.Jumping] &&
            ((FFXIVClientStructs.FFXIV.Client.Game.Character.Character*)actor.Address)->Mode is
                FFXIVClientStructs.FFXIV.Client.Game.Character.CharacterModes.EmoteLoop or
                FFXIVClientStructs.FFXIV.Client.Game.Character.CharacterModes.InPositionLoop;

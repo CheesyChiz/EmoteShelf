@@ -12,6 +12,7 @@ internal static partial class Localization
         }
     }
     private const string Additional = """
+Stopping the previous emote after acceptance…|承認後、前のエモートを停止しています…|Vorheriges Emote wird nach Annahme beendet…|Arrêt de l'emote précédente après acceptation…
 Failures also report character mode, emote ID/activity, sound timeout type, dance mode and relative height difference.|エラー時にはキャラクターモード、エモートIDと再生状態、音声タイムアウトの種類、ダンスモード、相対的な高低差も送信されます。|Bei Fehlern werden auch Charaktermodus, Emote-ID/Aktivität, Audio-Timeouttyp, Tanzmodus und relativer Höhenunterschied gemeldet.|Les erreurs signalent aussi le mode du personnage, l'ID et l'activité de l'emote, le type de délai audio, le mode de danse et l'écart de hauteur relatif.
 Shared dance — no movement|移動なしの同時ダンス|Gemeinsamer Tanz — ohne Bewegung|Danse partagée — sans déplacement
 Stationary dance: shared timed start after acceptance, without movement or turning.|承認後に同時開始します。移動や方向転換は行いません。|Tanz am Platz: gemeinsamer Start nach Annahme, ohne Bewegung oder Drehung.|Danse sur place : départ commun après acceptation, sans déplacement ni rotation.
