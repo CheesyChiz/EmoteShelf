@@ -69,6 +69,37 @@ internal static class CarrierConversion
         }
     }
 
+    private static bool IsManifest(string name) => name == "meta.json" || name == "default_mod.json" ||
+        (name.StartsWith("group_", StringComparison.Ordinal) && name.EndsWith(".json", StringComparison.Ordinal) &&
+         Path.GetFileName(name) == name);
+
+    // Penumbra owns serialization and identity metadata after import. Compare the
+    // meaning of manifests, but keep binary assets byte-exact and reject mapping edits.
+    internal static bool CachedFileMatches(string name, byte[] expected, byte[] actual)
+    {
+        if (expected.AsSpan().SequenceEqual(actual)) return true;
+        if (!IsManifest(name) || actual.Length > 2 * 1024 * 1024) return false;
+        try
+        {
+            JsonNode? Normalize(byte[] bytes)
+            {
+                var node = JsonNode.Parse(bytes);
+                if (name == "meta.json" && node is JsonObject meta)
+                    foreach (var key in new[] { "Id", "ModId", "Identifier", "LastWrite" }) meta.Remove(key);
+                foreach (var map in Maps(node))
+                    foreach (var pair in map.ToArray())
+                    {
+                        var path = pair.Value?.GetValue<string>() ?? throw new InvalidDataException("carrier_mapping");
+                        map[pair.Key] = ModPackage.SafePath(path).Replace('\\', '/').ToLowerInvariant();
+                    }
+                return node;
+            }
+            return JsonNode.DeepEquals(Normalize(expected), Normalize(actual));
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidDataException or InvalidOperationException or ArgumentException)
+        { return false; }
+    }
+
     internal static string Create(string modRoot, string sourceDirectory, string command, IReadOnlyList<Redirect> redirects, string? sourceCommand = null)
     {
         if (Path.GetFileName(sourceDirectory) != sourceDirectory || sourceDirectory is "" or "." or ".." || redirects.Count == 0)
@@ -152,11 +183,25 @@ internal static class CarrierConversion
             {
                 var path = Path.Combine(destination, ModPackage.SafePath(relative));
                 NoLinks(destination, path);
-                if (new FileInfo(path).Length != bytes.Length || !File.ReadAllBytes(path).AsSpan().SequenceEqual(bytes))
+                var size = new FileInfo(path).Length;
+                if (size > (IsManifest(relative) ? 2 * 1024 * 1024 : bytes.Length) ||
+                    !CachedFileMatches(relative, bytes, File.ReadAllBytes(path)))
                     throw new InvalidDataException("carrier_cache_changed");
             }
-            if (Directory.EnumerateFiles(destination, "*", SearchOption.AllDirectories).Count() != outputs.Count)
-                throw new InvalidDataException("carrier_cache_changed");
+            // Inspect each directory before descending: never follow a cache junction.
+            var pending = new Stack<string>();
+            pending.Push(destination);
+            while (pending.TryPop(out var folder))
+                foreach (var path in Directory.EnumerateFileSystemEntries(folder))
+                {
+                    NoLinks(destination, path);
+                    if (Directory.Exists(path)) { pending.Push(path); continue; }
+                    var relative = Path.GetRelativePath(destination, path).Replace('\\', '/');
+                    if (outputs.ContainsKey(relative)) continue;
+                    if (relative.EndsWith(".bak", StringComparison.Ordinal) &&
+                        IsManifest(relative[..^4]) && outputs.ContainsKey(relative[..^4])) continue;
+                    throw new InvalidDataException("carrier_cache_changed");
+                }
             return directory;
         }
         Directory.CreateDirectory(destination);

@@ -68,6 +68,27 @@ internal static class CarrierTests
             if (rewritten["Identifier"] is not null || rewritten["DefaultData"]!["Files"]![targetPath] is null ||
                 rewritten["Groups"]![0]!["Options"]![0]!["Files"]![targetPath] is null)
                 throw new Exception("V4 rewritten mappings or new identity lost");
+            var v4MetaPath = Path.Combine(root, v4copy, "meta.json");
+            var beforeImport = File.ReadAllBytes(v4MetaPath);
+            File.WriteAllBytes(v4MetaPath + ".bak", beforeImport);
+            rewritten["Identifier"] = Guid.NewGuid().ToString();
+            rewritten["LastWrite"] = "2026-10-14T00:00:00Z";
+            var v4Files = rewritten["DefaultData"]!["Files"]!;
+            var generatedPath = v4Files[targetPath]!.GetValue<string>();
+            v4Files[targetPath] = generatedPath.Replace('/', '\\').ToUpperInvariant();
+            File.WriteAllText(v4MetaPath, rewritten.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+            if (CarrierConversion.Create(root, "V4", "/dance", [new(special, targetPath, ["target_loop"])]) != v4copy)
+                throw new Exception("Penumbra metadata rewrite prevented carrier reuse.");
+            v4Files[targetPath] = "original.pap";
+            File.WriteAllText(v4MetaPath, rewritten.ToJsonString());
+            Reject(() => CarrierConversion.Create(root, "V4", "/dance", [new(special, targetPath, ["target_loop"])]));
+            File.WriteAllBytes(v4MetaPath, beforeImport);
+            File.WriteAllText(Path.Combine(root, v4copy, "unexpected.json"), "{}");
+            Reject(() => CarrierConversion.Create(root, "V4", "/dance", [new(special, targetPath, ["target_loop"])]));
+            File.Delete(Path.Combine(root, v4copy, "unexpected.json"));
+            if (CarrierConversion.CachedFileMatches("meta.json", beforeImport, "not json"u8.ToArray()) ||
+                CarrierConversion.CachedFileMatches("sound.scd", [1, 2], [1, 3]))
+                throw new Exception("Carrier cache accepted invalid metadata or changed binary.");
             var imported = ModPackage.ExtractNew(ModPackage.PackMod(root, "V4"), root);
             if (JsonNode.Parse(File.ReadAllText(Path.Combine(root, imported, "meta.json")))!["Identifier"] is not null)
                 throw new Exception("Received mod retained sender identity");
