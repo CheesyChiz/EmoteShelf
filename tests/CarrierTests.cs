@@ -6,6 +6,17 @@ internal static class CarrierTests
 {
     internal static void Run()
     {
+        var collection = Guid.NewGuid();
+        var persistentEnabled = true;
+        var temporaryEnabled = true;
+        for (var attempt = 0; attempt < 3; attempt++)
+            CarrierSettings.DisablePersistent([collection], id => { persistentEnabled = false; return true; },
+                (id, ignoreTemporary) => (true, ignoreTemporary ? persistentEnabled : temporaryEnabled));
+        if (!temporaryEnabled) throw new Exception("Carrier verification cleared active playback settings.");
+        Reject(() => CarrierSettings.DisablePersistent([collection], _ => false, (_, _) => (true, false)));
+        Reject(() => CarrierSettings.DisablePersistent([collection], _ => true, (_, _) => (true, true)));
+        Reject(() => CarrierSettings.DisablePersistent([collection], _ => true, (_, _) => (false, false)));
+        Reject(() => CarrierSettings.DisablePersistent([collection], _ => true, (_, _) => (true, null)));
         var gate = new CarrierRequestGate();
         var oldClick = gate.Next();
         var latestClick = gate.Next();

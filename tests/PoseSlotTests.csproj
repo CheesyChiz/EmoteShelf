@@ -21,6 +21,7 @@
     <Compile Include="../EmoteStopMotion.cs" Link="EmoteStopMotion.cs" />
     <Compile Include="../CarrierConversion.cs" Link="CarrierConversion.cs" />
     <Compile Include="../CarrierRequestGate.cs" Link="CarrierRequestGate.cs" />
+    <Compile Include="../CarrierSettings.cs" Link="CarrierSettings.cs" />
     <Compile Include="../PositionOffset.cs" Link="PositionOffset.cs" />
     <Compile Include="../NoireLoggerAdapter.cs" Link="NoireLoggerAdapter.cs" />
     <Compile Include="../third_party/NoireLib/PapFormat/**/*.cs" LinkBase="NoirePap" />

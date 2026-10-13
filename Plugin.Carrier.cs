@@ -113,13 +113,16 @@ public sealed partial class Plugin
                     return;
                 }
                 // Play only applies our temporary collection settings, never persistent enablement.
-                var ec = receivedSettings.Invoke(carrierImport, out var settings);
+                var ec = receivedSettings.Invoke(carrierImport, out var settings, ignoreTemporaryCollections: true);
                 if (ec != PenumbraApiEc.Success) throw new InvalidOperationException("carrier_settings_unavailable");
-                foreach (var collection in settings.Keys)
-                    if (setReceivedModEnabled.Invoke(collection, carrierImport, false) is not (PenumbraApiEc.Success or PenumbraApiEc.NothingChanged))
-                        throw new InvalidOperationException("carrier_disable_failed");
-                if (receivedSettings.Invoke(carrierImport, out settings) != PenumbraApiEc.Success || settings.Values.Any(s => s.Item1))
-                    throw new InvalidOperationException("carrier_disable_unconfirmed");
+                CarrierSettings.DisablePersistent(settings.Keys,
+                    collection => setReceivedModEnabled.Invoke(collection, carrierImport, false)
+                        is PenumbraApiEc.Success or PenumbraApiEc.NothingChanged,
+                    (collection, ignoreTemporary) =>
+                    {
+                        var (code, state) = getSettingsWithTemp.Invoke(collection, carrierImport, ignoreTemporary: ignoreTemporary);
+                        return (code == PenumbraApiEc.Success, state?.Item1);
+                    });
                 var bookmark = SnapshotBookmark(carrierRunning.Bookmark);
                 bookmark.ModDirectory = carrierImport; bookmark.Command = carrierReady!.Command;
                 if (catalog?.IsUnlocked(bookmark.Command, Unlocks) != true) throw new InvalidOperationException("carrier_unlock_changed");
