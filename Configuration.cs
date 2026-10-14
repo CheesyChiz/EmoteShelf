@@ -23,7 +23,8 @@ public sealed class Configuration : IPluginConfiguration
     public bool PanelGrowUp;
     public float IconSize = 44;
     public float PanelOpacity = 0.85f;
-    public bool English;
+    // New installations default to English; serialized legacy choices still win.
+    public bool English = true;
     public bool PairEnabled;
     public bool MaintainPairPhase = true;
     public bool PairDebug;

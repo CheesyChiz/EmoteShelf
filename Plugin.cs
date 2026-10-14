@@ -1689,7 +1689,7 @@ public sealed partial class Plugin : IDalamudPlugin
         if (ImGui.Button(T("Управление парой", "Partner controls"))) selectPartnerTab = true;
         if (ImGui.CollapsingHeader(T("Обязательная диагностика", "Required diagnostics"))) DrawReportSettings();
         var languages = new[] { ("ru", "Русский"), ("en", "English"), ("ja", "日本語"), ("de", "Deutsch"), ("fr", "Français") };
-        var selectedLanguage = languages.FirstOrDefault(x => x.Item1 == config.Language).Item2 ?? "Русский";
+        var selectedLanguage = languages.FirstOrDefault(x => x.Item1 == config.Language).Item2 ?? "English";
         ImGui.SetNextItemWidth(180);
         if (ImGui.BeginCombo(T("Язык интерфейса", "Interface language"), selectedLanguage))
         {

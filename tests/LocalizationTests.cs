@@ -23,6 +23,8 @@ internal static class LocalizationTests
                     throw new Exception("Missing translation or mismatched format placeholders: " + key);
         var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../"));
         var configuration = File.ReadAllText(Path.Combine(root, "Configuration.cs"));
+        if (!configuration.Contains("public bool English = true;"))
+            throw new Exception("Fresh installs must default to English.");
         var reportsUi = File.ReadAllText(Path.Combine(root, "Plugin.Reports.cs"));
         if (!reportsUi.Contains("config.DiagnosticsNoticeVersion > 0") || reportsUi.Contains("DiagnosticsPolicyVersion"))
             throw new Exception("First-use acknowledgement must survive release/policy version changes");
