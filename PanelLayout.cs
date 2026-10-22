@@ -4,6 +4,14 @@ namespace EmoteShelf;
 
 public static class PanelLayout
 {
+    public static Vector2 Size(int count, int columns, Vector2 cell, Vector2 spacing, Vector2 padding)
+    {
+        columns = Math.Max(1, columns);
+        var width = Math.Min(Math.Max(1, count), columns);
+        var rows = Math.Max(1, (count + columns - 1) / columns);
+        return new Vector2(width, rows) * cell + new Vector2(width - 1, rows - 1) * spacing + padding * 2;
+    }
+
     public static Vector2 Cell(int index, int count, int columns, bool left, bool up)
     {
         columns = Math.Max(1, columns);

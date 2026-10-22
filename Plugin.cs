@@ -787,24 +787,30 @@ public sealed partial class Plugin : IDalamudPlugin
     private bool previousPanelLeft, previousPanelUp;
     private void DrawOverlay()
     {
-        var flags = ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoTitleBar;
+        var columns = Math.Clamp(config.Columns, 1, 12);
+        var size = new Vector2(Math.Clamp(config.IconSize, 16, 80));
+        var cellSize = size + ImGui.GetStyle().FramePadding * 2;
+        var stride = cellSize + ImGui.GetStyle().ItemSpacing;
+        var hasCells = config.Bookmarks.Count > 0;
+        var requestedSize = PanelLayout.Size(config.Bookmarks.Count, columns, cellSize,
+            ImGui.GetStyle().ItemSpacing, ImGui.GetStyle().WindowPadding);
+        var flags = ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize;
+        if (!hasCells) flags |= ImGuiWindowFlags.AlwaysAutoResize;
         if (config.OverlayLocked) flags |= ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoResize | ImGuiWindowFlags.NoBackground;
         ImGui.SetNextWindowBgAlpha(Math.Clamp(config.PanelOpacity, 0f, 1f));
-        ImGui.SetNextWindowSize(new Vector2(240, 90), ImGuiCond.FirstUseEver);
+        // A deterministic grid avoids startup auto-fit/texture-loading sizes being
+        // mistaken for user-requested growth and shifting the saved window position.
+        if (hasCells) ImGui.SetNextWindowSize(requestedSize, ImGuiCond.Always);
         if (!ImGui.Begin("Emote Shelf##overlay", flags))
         { ImGui.End(); return; }
-        var panelSize = ImGui.GetWindowSize();
-        if (previousPanelSize is { } oldSize && previousPanelLeft == config.PanelGrowLeft && previousPanelUp == config.PanelGrowUp)
+        var panelSize = requestedSize;
+        if (hasCells && previousPanelSize is { } oldSize && previousPanelLeft == config.PanelGrowLeft && previousPanelUp == config.PanelGrowUp)
             ImGui.SetWindowPos(PanelLayout.ResizePosition(ImGui.GetWindowPos(), oldSize, panelSize, config.PanelGrowLeft, config.PanelGrowUp));
-        previousPanelSize = panelSize;
+        previousPanelSize = hasCells ? panelSize : null;
         previousPanelLeft = config.PanelGrowLeft;
         previousPanelUp = config.PanelGrowUp;
         if (config.Bookmarks.Count == 0) ImGui.TextDisabled(T("Добавь эмоции: /eshelf → Эмоции", "Add emotes: /eshelf → Emotes"));
-        var columns = Math.Clamp(config.Columns, 1, 12);
-        var size = new Vector2(Math.Clamp(config.IconSize, 16, 80));
         var origin = ImGui.GetCursorPos();
-        var cellSize = size + ImGui.GetStyle().FramePadding * 2;
-        var stride = cellSize + ImGui.GetStyle().ItemSpacing;
         ImGui.PushStyleVar(ImGuiStyleVar.Alpha, Math.Clamp(config.PanelOpacity, 0.1f, 1f));
         for (var i = 0; i < config.Bookmarks.Count; i++)
         {

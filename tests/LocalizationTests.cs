@@ -6,6 +6,16 @@ internal static class LocalizationTests
 {
     internal static void Run()
     {
+        var cell = new System.Numerics.Vector2(24, 22);
+        var spacing = new System.Numerics.Vector2(8, 4);
+        var padding = new System.Numerics.Vector2(8);
+        var grid = PanelLayout.Size(15, 12, cell, spacing, padding);
+        if (grid != new System.Numerics.Vector2(392, 64) ||
+            PanelLayout.Size(16, 12, cell, spacing, padding) != grid)
+            throw new Exception("Panel grid dimensions must be stable within the same row count.");
+        var saved = new System.Numerics.Vector2(10, 700);
+        if (PanelLayout.ResizePosition(saved, grid, grid, true, true) != saved)
+            throw new Exception("Restoring the same grid must not move the saved panel position.");
         if (!EmotePresentation.IsSecondary("/content", ["/content", "/golddance"]) ||
             !EmotePresentation.IsSecondary("/CONTENT", ["/content", "/hum"]) ||
             EmotePresentation.IsSecondary("/content", ["/content"]) ||
